@@ -1,0 +1,13 @@
+node_modules/
+.wrangler/
+.dev.vars
+.env
+*.log
+
+# Memoria de conversación (local-server/conversations.js): texto real de
+# conversaciones/clientes. NUNCA debe subirse a GitHub, a diferencia de kb/.
+local-server/data/
+
+# kb/ tiene su propio repo (KE-AI-Rules) y se lee en vivo desde ahí en cada
+# interpretación — no se duplica aquí para que no haya dos fuentes de verdad.
+/kb/

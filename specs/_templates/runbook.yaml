@@ -1,0 +1,44 @@
+# Copiar a kb/runbooks/<tema>.yaml
+id: ejemplo-consultar-membresia
+version: 1
+policy: membresias.md          # módulo de kb/docs/business-logic que lo respalda
+access_level: B                # A endpoint interno | B pasos UI | C exploratorio
+risk: R0                       # R0 lectura | R1 escritura reversible | R2 nunca automatizar
+approval: none                 # none | human_before_write
+
+inputs:                        # lo que se extrae del mensaje; si falta, pedirlo
+  - name: customer_phone
+    required: true
+    validate: "^[0-9]{10}$"
+  - name: location
+    required: true
+
+preconditions:
+  - sesión de Gravity activa (si no, detener y avisar a Juan)
+  - dominio permitido: access.thegravityapp.io
+
+steps:
+  - id: s1
+    action: goto
+    target: "https://access.thegravityapp.io/"
+  - id: s2
+    action: click
+    target: { role: link, name: "Customers" }       # roles/labels, nunca clases hasheadas
+  - id: s3
+    action: fill
+    target: { role: searchbox, name: "Search" }
+    value: "{customer_phone}"
+  - id: s4
+    action: read
+    target: { role: row, name: "{customer_phone}" }
+    save_as: membership_status
+    on_missing: escalate
+
+verify:                         # criterios de aceptación comprobables
+  - membership_status no está vacío
+  - la fila corresponde al teléfono pedido
+
+on_failure: escalate            # escalar con Allow me take a look + traza
+max_steps: 15
+timeout_seconds: 90
+response_template: "Hello {name}, the membership status is {membership_status}."

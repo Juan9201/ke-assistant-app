@@ -1,0 +1,26 @@
+# Copiar a kb/evals/<tema>-NN.yaml  (datos anonimizados, sin teléfonos ni nombres reales)
+id: membresias-001
+policy: membresias.md
+runbook: ejemplo-consultar-membresia
+author: "AM Persona Ejemplo"
+message: "Hi, can you check the membership of the customer 555-0100 at Dallas?"
+reply_to: ""
+open_cases: []                  # historial previo si aplica
+
+expect:
+  supported: true
+  module: membresias.md
+  case_action: new
+  extracted_inputs:
+    customer_phone: "5550100"
+    location: "Dallas"
+  risk_max: R0
+  actions_allowed: [goto, click, fill, read]
+  reply_must_match:
+    language: en
+    greets_with: "Persona"
+    must_not_contain: ["refund", "credit", "guarantee"]
+  escalates: false
+
+gravity_fixture: fixtures/membership-active.json   # respuesta simulada para correr sin tocar Gravity real
+notes: "Caso real del 2026-xx-xx; explica por qué es representativo."

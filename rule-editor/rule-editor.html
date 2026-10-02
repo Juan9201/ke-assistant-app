@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Editor de reglas KE</title>
+<style>
+  :root {
+    --bg: #f6f8fa; --panel: #ffffff; --text: #1f2328; --muted: #656d76; --border: #d0d7de;
+    --accent: #1f6feb; --accent-text: #ffffff; --star: #9a6700; --star-bg: #fff8c5;
+    --ok: #1a7f37; --err: #cf222e; --err-bg: #ffebe9; --hover: #eaeef2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --panel: #161b22; --text: #e6edf3; --muted: #8d96a0; --border: #30363d;
+      --accent: #2f81f7; --accent-text: #ffffff; --star: #d29922; --star-bg: #2d2305;
+      --ok: #3fb950; --err: #f85149; --err-bg: #3c1618; --hover: #21262d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 16px;
+    background: var(--panel); border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 16px; margin: 0; flex: 1; }
+  .conn { font-size: 12px; color: var(--muted); }
+  .conn.ok { color: var(--ok); } .conn.err { color: var(--err); }
+  button { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--border);
+    border-radius: 6px; padding: 5px 12px; cursor: pointer; }
+  button:hover { background: var(--hover); }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .layout { display: grid; grid-template-columns: 240px 1fr; min-height: calc(100vh - 51px); }
+  aside { border-right: 1px solid var(--border); background: var(--panel); padding: 12px; }
+  aside .row { display: flex; gap: 6px; margin-bottom: 10px; }
+  aside .row button { flex: 1; }
+  #ruleList { list-style: none; margin: 0; padding: 0; }
+  #ruleList li button { width: 100%; text-align: left; border: 0; border-radius: 6px; padding: 6px 8px;
+    background: transparent; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #ruleList li button:hover { background: var(--hover); }
+  #ruleList li button.active { background: var(--hover); font-weight: 600; }
+  #ruleList li button.template { color: var(--muted); font-style: italic; }
+  main { padding: 16px 24px; max-width: 920px; width: 100%; }
+  .placeholder { color: var(--muted); padding: 40px 0; text-align: center; }
+  label { display: block; font-weight: 600; margin: 14px 0 4px; }
+  .hint { font-weight: 400; color: var(--muted); font-size: 12px; margin-left: 6px; }
+  input[type=text], input[type=password], textarea, select {
+    width: 100%; font: inherit; color: var(--text); background: var(--panel);
+    border: 1px solid var(--border); border-radius: 6px; padding: 7px 9px; }
+  textarea { min-height: 90px; resize: vertical; }
+  textarea.mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; min-height: 60vh; }
+  .star { border-left: 3px solid var(--star); background: var(--star-bg); padding: 2px 10px 10px; border-radius: 6px; margin-top: 14px; }
+  .star label { color: var(--star); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .tabs { display: flex; gap: 4px; margin: 16px 0 0; border-bottom: 1px solid var(--border); }
+  .tabs button { border: 1px solid transparent; border-bottom: 0; border-radius: 6px 6px 0 0; background: transparent; }
+  .tabs button.active { border-color: var(--border); background: var(--panel); margin-bottom: -1px; }
+  .savebar { display: flex; gap: 10px; align-items: flex-end; margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .savebar > div { flex: 1; }
+  .savebar label { margin-top: 0; }
+  .msg { margin-top: 12px; padding: 8px 12px; border-radius: 6px; display: none; }
+  .msg.show { display: block; }
+  .msg.ok { color: var(--ok); border: 1px solid var(--ok); }
+  .msg.err { color: var(--err); background: var(--err-bg); border: 1px solid var(--err); }
+  .msg a { color: inherit; }
+  dialog { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 10px; width: min(480px, 92vw); }
+  dialog::backdrop { background: rgba(0,0,0,.4); }
+  .hidden { display: none !important; }
+  @media (max-width: 720px) {
+    .layout { grid-template-columns: 1fr; }
+    aside { border-right: 0; border-bottom: 1px solid var(--border); }
+    main { padding: 16px; }
+    .grid2 { grid-template-columns: 1fr; }
+    .savebar { flex-direction: column; align-items: stretch; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Editor de reglas — KE Assistant</h1>
+  <span id="conn" class="conn">sin conectar</span>
+  <button id="settingsBtn">Configuración</button>
+</header>
+
+<div class="layout">
+  <aside>
+    <div class="row">
+      <button id="newBtn" class="primary">+ Nueva</button>
+      <button id="refreshBtn" title="Recargar lista">↻</button>
+    </div>
+    <ul id="ruleList"></ul>
+  </aside>
+
+  <main>
+    <div id="empty" class="placeholder">Elige una regla de la lista o crea una nueva.</div>
+
+    <div id="editor" class="hidden">
+      <div class="grid2">
+        <div>
+          <label for="fileName">Archivo <span class="hint">minúsculas, sin acentos, .md</span></label>
+          <input id="fileName" type="text" placeholder="reembolsos.md">
+        </div>
+        <div>
+          <label for="title">Título</label>
+          <input id="title" type="text" placeholder="Reembolsos">
+        </div>
+      </div>
+
+      <div class="tabs">
+        <button id="tabForm" class="active">Formulario</button>
+        <button id="tabMd">Markdown</button>
+      </div>
+
+      <div id="formView">
+        <label for="f_que">Qué hace <span class="hint">2–4 frases: qué cubre y para quién</span></label>
+        <textarea id="f_que"></textarea>
+
+        <label for="f_condiciones">Condiciones <span class="hint">cuándo aplica la regla (una por línea, con "- ")</span></label>
+        <textarea id="f_condiciones"></textarea>
+
+        <label for="f_excepciones">Excepciones <span class="hint">cuándo NO aplica o cambia</span></label>
+        <textarea id="f_excepciones"></textarea>
+
+        <div class="star">
+          <label for="f_nivel">★ Nivel de autonomía permitido a la IA</label>
+          <select id="f_nivel">
+            <option value="puede responder sola">Puede responder sola</option>
+            <option value="con aviso">Con aviso (tú revisas con más cuidado)</option>
+            <option value="siempre debe escalar">Siempre debe escalar (la IA dice "Allow me take a look")</option>
+          </select>
+          <label for="f_nivelNotas">Notas <span class="hint">por qué este nivel</span></label>
+          <textarea id="f_nivelNotas"></textarea>
+        </div>
+
+        <div class="star">
+          <label for="f_errores">★ Errores comunes de quien recién empieza <span class="hint">lo que un novato respondería mal → lo correcto</span></label>
+          <textarea id="f_errores"></textarea>
+        </div>
+
+        <label for="f_casos">Casos reales <span class="hint">pregunta real anonimizada → respuesta correcta</span></label>
+        <textarea id="f_casos"></textarea>
+
+        <label for="f_extra">Otras secciones <span class="hint">se conservan tal cual (Markdown)</span></label>
+        <textarea id="f_extra"></textarea>
+      </div>
+
+      <div id="mdView" class="hidden">
+        <label for="mdText">Markdown completo</label>
+        <textarea id="mdText" class="mono" spellcheck="false"></textarea>
+      </div>
+
+      <div class="savebar">
+        <div>
+          <label for="commitMsg">Mensaje del commit</label>
+          <input id="commitMsg" type="text" placeholder="docs: actualizar reembolsos.md">
+        </div>
+        <button id="saveBtn" class="primary">Guardar en GitHub</button>
+      </div>
+      <div id="msg" class="msg"></div>
+    </div>
+  </main>
+</div>
+
+<dialog id="settings">
+  <form method="dialog">
+    <h3 style="margin-top:0">Configuración</h3>
+    <p class="hint" style="margin:0">Se guarda solo en este navegador (localStorage).</p>
+    <label for="s_url">URL del Worker</label>
+    <input id="s_url" type="text" placeholder="http://localhost:8787">
+    <label for="s_secret">SHARED_SECRET</label>
+    <input id="s_secret" type="password" autocomplete="off">
+    <label for="s_owner">Responsable por defecto</label>
+    <input id="s_owner" type="text" placeholder="Juan">
+    <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:16px">
+      <button value="cancel">Cancelar</button>
+      <button id="s_save" value="save" class="primary">Guardar</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+/* ================================================================ */
+/* CONFIGURACIÓN — placeholders (o déjalos así y usa el botón        */
+/* "Configuración", que guarda los valores solo en este navegador)   */
+/* ================================================================ */
+// Por defecto apunta al server local (local-server/). Si en vez de eso usas el
+// Worker de Cloudflare, cambia esto o usa el botón "Configuración".
+const DEFAULT_WORKER_URL = "http://localhost:8787";
+const DEFAULT_SHARED_SECRET = "PEGA_AQUI_EL_MISMO_SHARED_SECRET_DEL_BACKEND";
+const DEFAULT_OWNER = "Juan";
+
+const TEMPLATE_NAME = "_TEMPLATE.md";
+const NAME_RE = /^[a-z0-9_][a-z0-9_-]*\.md$/;
+const SECTIONS = [
+  { key: "que", heading: "Qué hace" },
+  { key: "condiciones", heading: "Condiciones" },
+  { key: "excepciones", heading: "Excepciones" },
+  { key: "nivel", heading: "Nivel de autonomía permitido a la IA" },
+  { key: "errores", heading: "Errores comunes de quien recién empieza" },
+  { key: "casos", heading: "Casos reales" },
+];
+const FALLBACK_TEMPLATE = SECTIONS.map((s) => `## ${s.heading}\n`).join("\n");
+
+const $ = (id) => document.getElementById(id);
+const state = { name: null, sha: null, meta: {}, mode: "form", loadedMd: "", rules: [] };
+
+/* ---------- ajustes ---------- */
+function store(key, value) {
+  try {
+    if (value === undefined) return localStorage.getItem(key);
+    localStorage.setItem(key, value);
+  } catch { return null; }
+}
+function settings() {
+  return {
+    url: (store("ke.url") || DEFAULT_WORKER_URL).replace(/\/+$/, ""),
+    secret: store("ke.secret") || DEFAULT_SHARED_SECRET,
+    owner: store("ke.owner") || DEFAULT_OWNER,
+  };
+}
+function isConfigured() {
+  const s = settings();
+  return !/PEGA_AQUI/.test(s.url + s.secret);
+}
+
+$("settingsBtn").onclick = () => {
+  const s = settings();
+  $("s_url").value = s.url;
+  $("s_secret").value = /PEGA_AQUI/.test(s.secret) ? "" : s.secret;
+  $("s_owner").value = s.owner;
+  $("settings").showModal();
+};
+$("settings").addEventListener("close", () => {
+  if ($("settings").returnValue !== "save") return;
+  store("ke.url", $("s_url").value.trim());
+  store("ke.secret", $("s_secret").value.trim());
+  store("ke.owner", $("s_owner").value.trim() || DEFAULT_OWNER);
+  loadList();
+});
+
+/* ---------- API del Worker ---------- */
+async function api(action, payload = {}) {
+  const s = settings();
+  const res = await fetch(s.url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Shared-Secret": s.secret },
+    body: JSON.stringify({ action, ...payload }),
+  });
+  let body = null;
+  try { body = await res.json(); } catch { /* se reporta abajo */ }
+  if (!res.ok) throw new Error((body && body.error) || `HTTP ${res.status}`);
+  return body;
+}
+
+function setConn(text, cls) {
+  $("conn").textContent = text;
+  $("conn").className = `conn ${cls || ""}`;
+}
+function showMsg(html, kind) {
+  $("msg").innerHTML = html;
+  $("msg").className = `msg show ${kind}`;
+}
+function clearMsg() { $("msg").className = "msg"; }
+const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+/* ---------- Markdown ⇄ formulario ---------- */
+const fold = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+const stripComments = (s) => s.replace(/<!--[\s\S]*?-->/g, "").replace(/\n{3,}/g, "\n\n").trim();
+
+function parseMd(md) {
+  md = md.replace(/\r\n/g, "\n");
+  const firstSection = md.search(/^## /m);
+  const head = firstSection === -1 ? md : md.slice(0, firstSection);
+  const body = firstSection === -1 ? "" : md.slice(firstSection);
+
+  const titleMatch = head.match(/^#\s+(.+)$/m);
+  const ownerMatch = head.match(/Responsable:\s*(.+)$/m);
+  const preamble = head
+    .replace(/^#\s+.+$/m, "")
+    .replace(/^>\s*Última revisión:.*$/m, "")
+    .trim();
+
+  const out = { title: titleMatch ? titleMatch[1].trim() : "", owner: ownerMatch ? ownerMatch[1].trim() : "",
+    preamble, extra: [], nivel: "siempre debe escalar", nivelNotas: "" };
+  SECTIONS.forEach((s) => (out[s.key] = ""));
+
+  body.split(/^## /m).filter(Boolean).forEach((chunk) => {
+    const nl = chunk.indexOf("\n");
+    const heading = (nl === -1 ? chunk : chunk.slice(0, nl)).trim();
+    const text = nl === -1 ? "" : chunk.slice(nl + 1);
+    const section = SECTIONS.find((s) => fold(heading).startsWith(fold(s.heading).split(" ").slice(0, 2).join(" ")));
+    if (!section) { out.extra.push(`## ${chunk.trim()}`); return; }
+    if (section.key === "nivel") {
+      const m = text.match(/\*\*Nivel:\*\*\s*(.+)/i);
+      const v = m ? fold(m[1]) : "";
+      out.nivel = v.includes("escalar") ? "siempre debe escalar" : v.includes("aviso") ? "con aviso" : v.includes("sola") ? "puede responder sola" : "siempre debe escalar";
+      out.nivelNotas = stripComments(text.replace(/\*\*Nivel:\*\*.*$/im, "")).replace(/^Notas:\s*/i, "");
+    } else {
+      out[section.key] = stripComments(text);
+    }
+  });
+  out.extra = out.extra.join("\n\n");
+  return out;
+}
+
+function buildMd() {
+  const today = new Date().toISOString().slice(0, 10);
+  const owner = state.meta.owner || settings().owner;
+  const v = (id) => $(id).value.trim();
+  let md = `# ${v("title") || "Sin título"}\n\n> Última revisión: ${today} · Responsable: ${owner}\n`;
+  if (state.meta.preamble) md += `\n${state.meta.preamble}\n`;
+  for (const s of SECTIONS) {
+    md += `\n## ${s.heading}\n\n`;
+    if (s.key === "nivel") {
+      md += `<!-- Opciones: puede responder sola | con aviso | siempre debe escalar -->\n**Nivel:** ${$("f_nivel").value}\n`;
+      if (v("f_nivelNotas")) md += `\nNotas: ${v("f_nivelNotas")}\n`;
+    } else if (v(`f_${s.key}`)) {
+      md += `${v(`f_${s.key}`)}\n`;
+    }
+  }
+  if (v("f_extra")) md += `\n${v("f_extra")}\n`;
+  return md;
+}
+
+function fillForm(md) {
+  const p = parseMd(md);
+  state.meta = { owner: p.owner, preamble: p.preamble };
+  $("title").value = p.title;
+  SECTIONS.forEach((s) => { if (s.key !== "nivel") $(`f_${s.key}`).value = p[s.key]; });
+  $("f_nivel").value = p.nivel;
+  $("f_nivelNotas").value = p.nivelNotas;
+  $("f_extra").value = p.extra;
+}
+
+function currentMd() {
+  if (state.mode === "md") return $("mdText").value;
+  return buildMd();
+}
+
+/* ---------- pestañas ---------- */
+function setMode(mode) {
+  if (mode === state.mode) return;
+  if (mode === "md") $("mdText").value = buildMd();
+  else fillForm($("mdText").value);
+  state.mode = mode;
+  $("formView").classList.toggle("hidden", mode !== "form");
+  $("mdView").classList.toggle("hidden", mode !== "md");
+  $("tabForm").classList.toggle("active", mode === "form");
+  $("tabMd").classList.toggle("active", mode === "md");
+}
+$("tabForm").onclick = () => setMode("form");
+$("tabMd").onclick = () => setMode("md");
+
+/* ---------- lista de reglas ---------- */
+function renderList() {
+  const ul = $("ruleList");
+  ul.innerHTML = "";
+  state.rules.forEach((r) => {
+    const btn = document.createElement("button");
+    btn.textContent = r.name;
+    if (r.isTemplate) btn.classList.add("template");
+    if (r.name === state.name) btn.classList.add("active");
+    btn.onclick = () => openRule(r.name);
+    const li = document.createElement("li");
+    li.append(btn);
+    ul.append(li);
+  });
+}
+
+async function loadList() {
+  if (!isConfigured()) {
+    setConn("falta configurar", "err");
+    $("settingsBtn").click();
+    return;
+  }
+  setConn("conectando…");
+  try {
+    const { rules } = await api("list_rules");
+    state.rules = rules;
+    renderList();
+    setConn(`conectado · ${rules.filter((r) => !r.isTemplate).length} reglas`, "ok");
+  } catch (e) {
+    setConn("error de conexión", "err");
+    alert(`No se pudo cargar la lista: ${e.message}`);
+  }
+}
+$("refreshBtn").onclick = loadList;
+
+/* ---------- abrir / nueva ---------- */
+function isDirty() {
+  return !$("editor").classList.contains("hidden") && currentMd() !== state.loadedMd;
+}
+function confirmDiscard() {
+  return !isDirty() || confirm("Tienes cambios sin guardar. ¿Descartarlos?");
+}
+
+function showEditor(md, { name, sha }) {
+  state.name = name;
+  state.sha = sha;
+  state.mode = "form";
+  $("formView").classList.remove("hidden");
+  $("mdView").classList.add("hidden");
+  $("tabForm").classList.add("active");
+  $("tabMd").classList.remove("active");
+  fillForm(md);
+  $("fileName").value = name || "";
+  $("fileName").disabled = Boolean(sha);
+  $("commitMsg").value = "";
+  $("empty").classList.add("hidden");
+  $("editor").classList.remove("hidden");
+  state.loadedMd = buildMd();
+  clearMsg();
+  renderList();
+}
+
+async function openRule(name) {
+  if (!confirmDiscard()) return;
+  try {
+    const rule = await api("get_rule", { name });
+    showEditor(rule.content, { name: rule.name, sha: rule.sha });
+  } catch (e) {
+    alert(`No se pudo abrir ${name}: ${e.message}`);
+  }
+}
+
+$("newBtn").onclick = async () => {
+  if (!confirmDiscard()) return;
+  let md = FALLBACK_TEMPLATE;
+  try { md = (await api("get_rule", { name: TEMPLATE_NAME })).content; } catch { /* plantilla local */ }
+  showEditor(md, { name: null, sha: null });
+  $("title").value = "";
+  state.meta.preamble = ""; // el comentario de instrucciones de la plantilla no va en la regla nueva
+  state.loadedMd = buildMd();
+  $("fileName").focus();
+};
+
+/* ---------- guardar ---------- */
+$("saveBtn").onclick = async () => {
+  const name = $("fileName").value.trim();
+  if (!NAME_RE.test(name)) {
+    showMsg("Nombre de archivo inválido. Usa minúsculas, números y guiones, terminado en <b>.md</b> (ej. <code>reembolsos.md</code>).", "err");
+    return;
+  }
+  if (!$("title").value.trim() && state.mode === "form") {
+    showMsg("Ponle un título a la regla.", "err");
+    return;
+  }
+  if (name === TEMPLATE_NAME && !confirm("Vas a modificar la PLANTILLA. ¿Seguro?")) return;
+  if (!state.sha && state.rules.some((r) => r.name === name)) {
+    showMsg(`Ya existe <b>${escapeHtml(name)}</b>. Ábrelo desde la lista para editarlo.`, "err");
+    return;
+  }
+
+  const content = currentMd();
+  $("saveBtn").disabled = true;
+  showMsg("Guardando…", "ok");
+  try {
+    const res = await api("save_rule", {
+      name,
+      content,
+      sha: state.sha || undefined,
+      message: $("commitMsg").value.trim() || `docs: ${state.sha ? "actualizar" : "crear"} ${name}`,
+    });
+    state.name = res.name;
+    state.sha = res.sha;
+    $("fileName").disabled = true;
+    if (state.mode === "md") $("mdText").value = content;
+    state.loadedMd = currentMd();
+    $("commitMsg").value = "";
+    const link = res.commit && res.commit.url ? ` · <a href="${escapeHtml(res.commit.url)}" target="_blank" rel="noopener">ver commit</a>` : "";
+    showMsg(`Guardado <b>${escapeHtml(res.name)}</b>${link}`, "ok");
+    loadList();
+  } catch (e) {
+    showMsg(escapeHtml(e.message), "err");
+  } finally {
+    $("saveBtn").disabled = false;
+  }
+};
+
+window.addEventListener("beforeunload", (e) => {
+  if (isDirty()) { e.preventDefault(); e.returnValue = ""; }
+});
+
+loadList();
+</script>
+</body>
+</html>

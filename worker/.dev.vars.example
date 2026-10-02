@@ -1,0 +1,5 @@
+# Copia este archivo como .dev.vars para probar con `npm run dev` (nunca lo subas a Git).
+LLM_PROVIDER=deepseek
+LLM_API_KEY=PEGA_AQUI_TU_API_KEY
+SHARED_SECRET=PEGA_AQUI_UN_SECRETO_LARGO_ALEATORIO
+GITHUB_TOKEN=PEGA_AQUI_TU_FINE_GRAINED_PAT
