@@ -20,6 +20,10 @@ import { handleAction, HttpError, parseRolePrefixes, extractGreetingName } from 
 import { analyzeFlameRequest, ANALYSIS_CONTRACT } from "./flamerequest.js";
 import { handleLogsRequest } from "./logsserver.js";
 import { createFlowLogger } from "./flowlog.js";
+import { createTicketStore } from "./tickets.js";
+import { createCommandStore } from "./commands.js";
+import { createTicketOps } from "./ticketops.js";
+import { handleTicketsRequest } from "./ticketsserver.js";
 import { loadParks, parkOptions } from "./parks.js";
 import { readImage, mergeVision, MAX_IMAGE_BYTES } from "./vision.js";
 import { createLookupStore } from "./lookups.js";
@@ -68,6 +72,12 @@ const rememberGravity = (caseId, g) => {
 };
 const visionFor = (caseId) => (caseId && visionByCase.has(caseId) ? mergeVision(visionByCase.get(caseId)) : null);
 
+// Tickets persistentes y cola de comandos hacia Connecteam (spec 006). KE_TICKETS_FILE solo lo usan las pruebas.
+const tickets = createTicketStore({ file: process.env.KE_TICKETS_FILE || undefined });
+const commands = createCommandStore();
+// El caseId canónico de un ticket (varios mensajes del mismo staff comparten ticket y, con él, fotos, lecturas y logs).
+const canon = (id) => tickets.canonicalCase(String(id || "").slice(0, 120));
+
 /** Nombre para saludar (sin el rango, p. ej. "AM Rashel Carswell" → "Rashel"), con la tabla de rangos del glosario local. */
 function greetingNameFor(author) {
   let prefixes = new Set();
@@ -82,6 +92,16 @@ function greetingNameFor(author) {
 }
 
 const SHARED_SECRET = process.env.SHARED_SECRET || "";
+
+const ops = createTicketOps({
+  tickets,
+  commands,
+  lookups,
+  log: flowLog,
+  visionFor,
+  gravityFor: (caseId) => gravityByCase.get(caseId) || null,
+  greetingNameFor,
+});
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "*").split(",").map((s) => s.trim());
 
 function corsHeaders(req) {
@@ -173,6 +193,7 @@ const server = http.createServer(async (req, res) => {
 
   // Página y datos de logs: solo lectura, sin CORS, solo Host local (spec 001). Va aparte del resto.
   if (handleLogsRequest(req, res, { dir: LOGS_DIR })) return;
+  if (handleTicketsRequest(req, res, { tickets, logsDir: LOGS_DIR, secret: SHARED_SECRET })) return;
 
   if (req.method !== "POST") {
     sendJson(res, 405, headers, { error: "Method not allowed" });
@@ -208,13 +229,20 @@ const server = http.createServer(async (req, res) => {
       const author = String(body.author || "").slice(0, 200);
       const overrides = body.overrides && typeof body.overrides === "object" ? body.overrides : {};
       const caseId = String(body.caseId || "").slice(0, 120);
-      const analysis = analyzeFlameRequest({ text, author, greetingName: greetingNameFor(author), overrides, vision: visionFor(caseId), gravity: gravityByCase.get(caseId) || null });
-      try {
-        flowLog.onAnalysis({ caseId, text, author, edited: Object.keys(overrides).length > 0 }, analysis);
-      } catch (err) {
-        console.error("No se pudo escribir el log:", err.message); // un fallo de log nunca debe tumbar el análisis
-      }
-      sendJson(res, 200, headers, { contract: ANALYSIS_CONTRACT, ...analysis });
+      const images = Array.isArray(body.images) ? body.images.filter((u) => typeof u === "string").slice(0, 6) : [];
+      const { analysis, ticket } = ops.analyzeMessage({
+        caseId,
+        messageKey: String(body.messageKey || "").slice(0, 200),
+        messageId: String(body.messageId || "").slice(0, 120),
+        author,
+        text,
+        images,
+        overrides,
+        channel: String(body.channel || "").slice(0, 80),
+      });
+      const out = { contract: ANALYSIS_CONTRACT, ...analysis };
+      if (ticket) out.ticket = { id: ticket.id, number: ticket.number, caseId: ticket.caseId, status: ticket.status };
+      sendJson(res, 200, headers, out);
       return;
     }
 
@@ -226,7 +254,7 @@ const server = http.createServer(async (req, res) => {
 
     // Foto del ticket (reducida en el navegador): OCR local + palabras clave de la KB (spec 003).
     if (body.action === "read_image") {
-      const caseId = String(body.caseId || "").slice(0, 120);
+      const caseId = canon(body.caseId);
       if (!caseId) throw new HttpError(400, "Falta caseId");
       if (!/^image\/(jpeg|png|webp)$/.test(String(body.mime || ""))) throw new HttpError(400, "Tipo de imagen no permitido (usa jpeg, png o webp)");
       const buf = Buffer.from(String(body.imageBase64 || ""), "base64");
@@ -244,13 +272,15 @@ const server = http.createServer(async (req, res) => {
       } catch (err) {
         console.error("No se pudo escribir el log de visión:", err.message);
       }
+      const tk = tickets.findByCase(caseId);
+      if (tk) ops.refresh(tk.id); // el ticket se re-evalúa solo con lo que dice la foto
       sendJson(res, 200, headers, { contract: ANALYSIS_CONTRACT, ...result });
       return;
     }
 
     // Consultas de solo lectura (T-07/T-08): el panel las pide, el lector de cada sistema las atiende.
     if (body.action === "lookup_create") {
-      const r = lookups.create({ system: body.system, kind: body.kind, params: body.params || {}, caseId: String(body.caseId || "").slice(0, 120) });
+      const r = lookups.create({ system: body.system, kind: body.kind, params: body.params || {}, caseId: canon(body.caseId) });
       if (!r.ok) throw new HttpError(400, r.error);
       if (!r.reused && r.job.caseId) {
         try {
@@ -283,6 +313,8 @@ const server = http.createServer(async (req, res) => {
       if (data && job.caseId) {
         const g = { ...data, requestedReceipt: job.params.receiptNumber };
         rememberGravity(job.caseId, g);
+        const tk = tickets.findByCase(job.caseId);
+        if (tk) ops.refresh(tk.id); // el ticket se re-evalúa solo con la lectura de Gravity
         try {
           flowLog.onGravity(job.caseId, { receiptNumber: job.params.receiptNumber, gravity: g, evaluation: evaluateGravity({ gravity: g, chatCard: null }) });
         } catch (err) {
@@ -308,10 +340,52 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // Consola de tickets (spec 006): corregir, responder, aprobar. Los comandos los ejecuta el listener dentro de Connecteam.
+    if (body.action === "ticket_reanalyze") {
+      const r = ops.reanalyze({ ticketId: String(body.ticketId || ""), overrides: body.overrides && typeof body.overrides === "object" ? body.overrides : {} });
+      if (!r.ok) throw new HttpError(404, r.error);
+      sendJson(res, 200, headers, r);
+      return;
+    }
+    if (body.action === "ticket_draft") {
+      const r = ops.setDraft({ ticketId: String(body.ticketId || ""), text: String(body.text ?? "") });
+      if (!r.ok) throw new HttpError(404, r.error);
+      sendJson(res, 200, headers, r);
+      return;
+    }
+    if (body.action === "ticket_reply") {
+      const r = ops.reply({ ticketId: String(body.ticketId || ""), text: String(body.text || ""), mode: String(body.mode || "") });
+      if (!r.ok) throw new HttpError(400, r.error);
+      sendJson(res, 200, headers, r);
+      return;
+    }
+    if (body.action === "ticket_action") {
+      const r = ops.act({ ticketId: String(body.ticketId || ""), action: String(body.action_name || body.what || "") });
+      if (!r.ok) throw new HttpError(400, r.error);
+      sendJson(res, 200, headers, r);
+      return;
+    }
+    if (body.action === "command_next") {
+      sendJson(res, 200, headers, { command: commands.next(String(body.target || "")) });
+      return;
+    }
+    if (body.action === "command_result") {
+      const r = ops.commandResult({ id: String(body.id || ""), ok: !!body.ok, error: String(body.error || ""), note: String(body.note || "") });
+      if (!r.ok) throw new HttpError(409, r.error);
+      sendJson(res, 200, headers, r);
+      return;
+    }
+    if (body.action === "command_status") {
+      const c = commands.get(String(body.id || ""));
+      if (!c) throw new HttpError(404, "Comando no encontrado");
+      sendJson(res, 200, headers, { id: c.id, status: c.status, error: c.error, type: c.type });
+      return;
+    }
+
     // El panel registra decisiones de Juan (aprobar / negar) y errores en los logs.
     if (body.action === "log_event") {
       try {
-        flowLog.onPanelEvent(body);
+        flowLog.onPanelEvent({ ...body, caseId: canon(body.caseId) });
       } catch (err) {
         throw new HttpError(400, err.message);
       }

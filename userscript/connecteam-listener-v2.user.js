@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         KE Assistant — Connecteam listener v2
 // @namespace    https://github.com/Juan9201/ke-assistant
-// @version      2.5.2
+// @version      2.6.0
 // @description  Detecta mensajes nuevos en Gravity Support y sugiere una respuesta. Solo envía si tú haces clic en "Enviar".
 // @match        https://app.connecteam.com/*
 // @grant        GM_xmlhttpRequest
@@ -103,7 +103,7 @@
 
   // Versión del "contrato" con el servidor local (forma de la respuesta de analyze_flames).
   // Si no coincide con la del servidor, el panel avisa en vez de fallar con un error críptico.
-  const SCRIPT_VERSION = "2.5.2";
+  const SCRIPT_VERSION = "2.6.0";
   const EXPECTED_CONTRACT = 2;
 
   const QUIET_MS = 2500; // tiempo sin cambios para considerar que el historial terminó de cargar
@@ -402,7 +402,8 @@
         let analysis;
         try {
           data.caseId = data.caseId || (data.id ? `msg-${data.id}-${contentHash(data)}` : `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
-          analysis = await callBackend({ action: "analyze_flames", caseId: data.caseId, text: data.text, author: data.author });
+          analysis = await callBackend({ action: "analyze_flames", caseId: data.caseId, messageKey: messageKey(null, data), messageId: data.id, images: data.images || [], channel: getChannelName(), text: data.text, author: data.author });
+          if (analysis.ticket && analysis.ticket.caseId) data.caseId = analysis.ticket.caseId; // varios mensajes del mismo staff comparten ticket
         } catch (e) {
           throw new Error(`${e.message} (¿reiniciaste el servidor local tras actualizar?)`);
         }
@@ -481,6 +482,19 @@
     return null;
   }
 
+  /** Vacía el cuadro de texto (para reemplazar una sugerencia automática por la respuesta de la consola). */
+  function clearComposer(el) {
+    el.focus();
+    if (el.isContentEditable) {
+      document.execCommand("selectAll", false, null);
+      if (!document.execCommand("delete", false, null)) el.textContent = "";
+    } else {
+      const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), "value").set;
+      setter.call(el, "");
+    }
+    el.dispatchEvent(new InputEvent("input", { bubbles: true }));
+  }
+
   function insertIntoComposer(el, text) {
     el.focus();
     if (el.isContentEditable) {
@@ -533,6 +547,7 @@
    * flujo por esto.
    */
   function insertReplyToOriginal(data, text, done) {
+    let quoted = false;
     const finish = () => {
       const composer = findComposer();
       if (!composer) return done(false);
@@ -542,9 +557,9 @@
       // contra el texto original desarmaría el guardián de Enter por error.
       pendingAiText = norm(composer.isContentEditable ? composer.innerText : composer.value);
       pendingAiComposer = composer;
-      done(true);
+      done(true, quoted);
     };
-    if (CONFIG.USE_NATIVE_REPLY && clickReply(data.id)) {
+    if (CONFIG.USE_NATIVE_REPLY && (quoted = clickReply(data.id))) {
       setTimeout(finish, 200); // deja que Connecteam actualice el composer con la cita
     } else {
       finish();
@@ -558,15 +573,18 @@
    * (un clic o un Enter sobre una sugerencia sin editar) lo dispare.
    * Devuelve: "sent" | "cancelled" | "no-composer" | "empty" | "no-send-button".
    */
-  function confirmAndSend() {
+  function confirmAndSend(opts = {}) {
     const composer = findComposer();
     if (!composer) return "no-composer";
 
     const current = norm(composer.isContentEditable ? composer.innerText : composer.value);
     if (!current) return "empty";
 
+    // Un envío pedido desde la consola: solo si el cuadro tiene EXACTAMENTE lo que se insertó (si no, no se envía).
+    if (opts.expectedText && norm(opts.expectedText) !== current) return "changed";
+
     const channel = getChannelName() || "este chat";
-    if (!confirm(`¿Enviar este mensaje a "${channel}"?\n\n"${current}"`)) return "cancelled";
+    if (!opts.skipConfirm && !confirm(`¿Enviar este mensaje a "${channel}"?\n\n"${current}"`)) return "cancelled";
 
     const sendButton = findSendButton(composer);
     if (!sendButton) return "no-send-button";
@@ -1275,7 +1293,7 @@
       if (edited.flames && flamesIn.value !== "") overrides.flames = Number(flamesIn.value);
       if (edited.amountUsd && amountIn.value !== "") overrides.amountUsd = Number(amountIn.value);
       try {
-        const a = await callBackend({ action: "analyze_flames", caseId: data.caseId, text: data.text, author: data.author, overrides });
+        const a = await callBackend({ action: "analyze_flames", caseId: data.caseId, messageKey: messageKey(null, data), messageId: data.id, images: data.images || [], text: data.text, author: data.author, overrides });
         if (mine !== seq) return; // llegó una respuesta más nueva
         analysis = a;
         render();
@@ -1390,6 +1408,71 @@
   }
 
   /* ================================================================ */
+  /* Comandos de la consola de tickets (spec 006): insertar o enviar una */
+  /* respuesta en Connecteam, citando al staff                          */
+  /* ================================================================ */
+  /** Id del mensaje a citar. Se confirma por contenido (en casos reales dos mensajes compartieron id). */
+  function findStaffMessageId(p) {
+    const snippet = norm(p.snippet || "").slice(0, 60).toLowerCase();
+    const textOf = (wrapper) => norm(extractText(wrapper.querySelector(SEL.message) || wrapper)).toLowerCase();
+    const byId = p.messageId ? document.querySelector(`[data-message-id="${CSS.escape(p.messageId)}"]`) : null;
+    if (byId && (!snippet || textOf(byId).includes(snippet))) return p.messageId;
+    if (snippet) {
+      const hit = Array.from(document.querySelectorAll(SEL.messageWrapper)).reverse().find((w) => textOf(w).includes(snippet));
+      if (hit) return hit.getAttribute("data-message-id") || "";
+    }
+    return byId ? p.messageId : ""; // sin coincidencia por contenido: el id tal cual (mejor esfuerzo)
+  }
+
+  async function runCommand(cmd) {
+    const report = (ok, error, note) => callBackend({ action: "command_result", id: cmd.id, ok, error: error || "", note: note || "" }).catch(() => {});
+    if (!isTargetChannel()) return report(false, "Connecteam no está en el chat Gravity Support: ábrelo en esta pestaña y reintenta.");
+    const p = cmd.params;
+    if (cmd.type === "insert_reply") {
+      // Si el cuadro solo tiene la sugerencia automática (o ya esta misma respuesta) se reemplaza; si tiene texto de una persona, no se pisa.
+      const box = findComposer();
+      if (box && !composerIsEmpty(box)) {
+        const cur = norm(box.isContentEditable ? box.innerText : box.value);
+        if (cur === pendingAiText || cur === norm(p.text)) clearComposer(box);
+        else return report(false, "El cuadro de Connecteam ya tiene texto escrito: envíalo o bórralo y vuelve a intentarlo (no se pisa lo que escribe una persona).");
+      }
+      const id = findStaffMessageId(p);
+      insertReplyToOriginal({ id }, p.text, (ok, quoted) =>
+        report(ok, ok ? "" : "No encontré el cuadro de texto de Connecteam.", ok && !quoted ? "No encontré el mensaje del staff en pantalla: la respuesta se insertó sin citarlo." : ""),
+      );
+      return;
+    }
+    if (cmd.type === "send_reply") {
+      const r = confirmAndSend({ skipConfirm: true, expectedText: p.text });
+      const why = {
+        sent: "",
+        cancelled: "Cancelado.",
+        "no-composer": "No encontré el cuadro de texto de Connecteam.",
+        empty: "El cuadro de Connecteam está vacío: inserta primero la respuesta.",
+        "no-send-button": "No encontré el botón Enviar de Connecteam.",
+        changed: "El texto del cuadro cambió desde que se insertó: no se envió. Vuelve a insertar y envía.",
+      }[r];
+      report(r === "sent", why);
+      return;
+    }
+    report(false, `Comando desconocido: ${cmd.type}`);
+  }
+
+  let cmdBusy = false;
+  async function pollCommands() {
+    if (cmdBusy) return;
+    cmdBusy = true;
+    try {
+      const { command } = await callBackend({ action: "command_next", target: "connecteam" });
+      if (command) await runCommand(command);
+    } catch {
+      /* servidor apagado o sin comandos: se reintenta en el siguiente ciclo */
+    } finally {
+      cmdBusy = false;
+    }
+  }
+
+  /* ================================================================ */
   /* Arranque                                                          */
   /* ================================================================ */
   function start() {
@@ -1409,6 +1492,7 @@
     new MutationObserver(onMutations).observe(document.body, { childList: true, subtree: true });
     scheduleArm();
     setInterval(() => armed && evaluateTail(), RESCAN_INTERVAL_MS);
+    setInterval(pollCommands, 2000); // órdenes de la consola de tickets (insertar o enviar una respuesta)
   }
 
   start();

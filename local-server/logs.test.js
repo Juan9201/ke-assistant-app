@@ -105,3 +105,17 @@ test("los eventos de un caso se ordenan por hora aunque el servidor se haya rein
   const c = loadLogs(dir).find((x) => x.id === "r1");
   assert.deepEqual(c.events.map((e) => e.title), ["primero", "después"]);
 });
+
+import { loadCaseEvents } from "./logs.js";
+
+test("loadCaseEvents trae solo los eventos del caso pedido (y de sus alias), en orden", () => {
+  const dir = tmpDir();
+  createLog({ caseId: "a1" }, { dir }).add("input", "uno");
+  createLog({ caseId: "b2" }, { dir }).add("input", "otro caso");
+  const t = createLog({ caseId: "a1-alias" }, { dir });
+  t.add("reply", "dos");
+  const ev = loadCaseEvents(["a1", "a1-alias"], dir);
+  assert.deepEqual(ev.map((e) => e.title), ["uno", "dos"]);
+  assert.deepEqual(loadCaseEvents("nada", dir), []);
+  assert.deepEqual(loadCaseEvents("", dir), []);
+});

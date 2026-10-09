@@ -37,7 +37,7 @@ function request({ method = "GET", p = "/", host, body, secret = SECRET }) {
 }
 
 before(async () => {
-  child = spawn(process.execPath, ["server.js"], { cwd: HERE, env: { ...process.env, PORT: String(PORT), SHARED_SECRET: SECRET, KE_LOGS_DIR: fs.mkdtempSync(path.join(os.tmpdir(), "ke-srv-logs-")) }, stdio: ["ignore", "pipe", "pipe"] });
+  child = spawn(process.execPath, ["server.js"], { cwd: HERE, env: { ...process.env, PORT: String(PORT), SHARED_SECRET: SECRET, KE_LOGS_DIR: fs.mkdtempSync(path.join(os.tmpdir(), "ke-srv-logs-")), KE_TICKETS_FILE: path.join(fs.mkdtempSync(path.join(os.tmpdir(), "ke-srv-tk-")), "tickets.json") }, stdio: ["ignore", "pipe", "pipe"] });
   await new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error("el servidor no arrancó")), 8000);
     child.stdout.on("data", (d) => /escuchando/.test(String(d)) && (clearTimeout(t), resolve()));
@@ -135,6 +135,10 @@ test("foto real: read_image lee el ticket y analyze_flames del mismo caso ya tra
 });
 
 /* ---------- Consultas de solo lectura a Gravity (T-07) ---------- */
+// Vacía la cola de consultas a Gravity: el servidor pide lecturas por su cuenta (p. ej. tras leer una foto) y las pruebas de la cola no deben tropezar con ellas.
+const drain = async () => {
+  for (let i = 0; i < 20; i++) if (!(await post({ action: "lookup_next", system: "gravity" })).json.job) return;
+};
 const post = async (body) => {
   const r = await request({ method: "POST", body });
   return { status: r.status, json: r.body ? JSON.parse(r.body) : null };
@@ -151,6 +155,7 @@ test("el lector de Gravity se sirve con el secreto inyectado por el servidor; un
 });
 
 test("lookup: valida lo que se pide y solo entrega consultas al lector del sistema correcto", async () => {
+  await drain();
   assert.equal((await post({ action: "lookup_create", system: "google", kind: "transaction", params: {} })).status, 400);
   assert.equal((await post({ action: "lookup_create", system: "gravity", kind: "transaction", params: { receiptNumber: "abc" } })).status, 400);
   const c = await post({ action: "lookup_create", caseId: "prueba-lk-0", system: "gravity", kind: "transaction", params: { receiptNumber: "19400000" } });
@@ -161,6 +166,7 @@ test("lookup: valida lo que se pide y solo entrega consultas al lector del siste
 });
 
 test("ciclo completo: el panel pide, el lector responde (con datos personales que se filtran) y el análisis trae el veredicto A", async () => {
+  await drain();
   const caseId = "prueba-lk-1";
   const c = await post({ action: "lookup_create", caseId, system: "gravity", kind: "transaction", params: { receiptNumber: "19400001" } });
   const job = (await post({ action: "lookup_next", system: "gravity" })).json.job;
@@ -194,6 +200,7 @@ test("ciclo completo: el panel pide, el lector responde (con datos personales qu
 });
 
 test("lookup_result: el servidor vuelve a filtrar aunque el lector mande de más", async () => {
+  await drain();
   const caseId = "prueba-lk-2";
   const c = await post({ action: "lookup_create", caseId, system: "gravity", kind: "transaction", params: { receiptNumber: "19400003" } });
   const job = (await post({ action: "lookup_next", system: "gravity" })).json.job;
@@ -213,6 +220,7 @@ test("el listener se entrega con el secreto inyectado por el servidor (el archiv
 });
 
 test("los logs registran la consulta pedida y el error del lector (se ven en /api/logs)", async () => {
+  await drain();
   const caseId = "prueba-lk-log";
   const c = await post({ action: "lookup_create", caseId, system: "gravity", kind: "transaction", params: { receiptNumber: "19400077" } });
   await post({ action: "lookup_create", caseId, system: "gravity", kind: "transaction", params: { receiptNumber: "19400077" } }); // repetida: no duplica el evento
@@ -225,4 +233,95 @@ test("los logs registran la consulta pedida y el error del lector (se ven en /ap
   const kinds = caso.events.map((e) => e.kind);
   assert.equal(kinds.filter((k) => k === "action").length, 1, "una sola consulta pedida");
   assert.ok(caso.events.some((e) => e.kind === "error" && /sesión de Gravity caducó/.test(e.detail)));
+});
+
+/* ---------- Consola de tickets (spec 006) ---------- */
+const getJson = async (p, host) => {
+  const r = await request({ p, host });
+  return { status: r.status, headers: r.headers, json: r.body && r.headers["content-type"]?.includes("json") ? JSON.parse(r.body) : null, body: r.body };
+};
+const flames = (extra = {}) => ({ action: "analyze_flames", caseId: "msg-tk-1", messageKey: "k-tk-1", messageId: "m-tk-1", author: "AM Rashel Carswell", text: "Playcard not loading flames, card 3968122745", images: ["https://public.cdn.connecteam.com/x/y.jpg"], ...extra });
+
+test("un pedido de flames crea un ticket; aparece en /api/tickets y su detalle trae los logs del caso", async () => {
+  const a = await post(flames());
+  assert.equal(a.status, 200);
+  assert.equal(a.json.ticket.number >= 1, true);
+  const id = a.json.ticket.id;
+  const list = await getJson("/api/tickets");
+  assert.equal(list.status, 200);
+  assert.ok(list.json.tickets.some((t) => t.id === id && t.status === "waiting_staff"));
+  const d = await getJson(`/api/tickets/${id}`);
+  assert.equal(d.json.ticket.messages[0].images.length, 1);
+  assert.ok(d.json.logs.some((e) => e.kind === "input"), "los logs del caso vienen con el ticket");
+  assert.equal((await getJson("/api/tickets/T9999")).status, 404);
+});
+
+test("hilo por el servidor: la respuesta del mismo staff completa el mismo ticket", async () => {
+  const first = (await post(flames({ caseId: "msg-hilo-1", messageKey: "k-h1", author: "M Ana Ruiz", text: "play card 3968122745 not loading flames", images: [] }))).json;
+  assert.ok(first.missing.includes("park"));
+  const second = (await post({ action: "analyze_flames", caseId: "msg-hilo-2", messageKey: "k-h2", author: "M Ana Ruiz", text: "arlington, receipt 19402005" })).json;
+  assert.equal(second.ticket.id, first.ticket.id, "mismo ticket");
+  assert.equal(second.fields.parkCode, "TX-Arlington");
+  assert.equal(second.fields.receiptNumber, "19402005");
+  assert.equal(second.ticket.caseId, first.ticket.caseId, "el caseId canónico es el del primer mensaje");
+});
+
+test("la página /tickets lleva el secreto inyectado, solo con Host local y sin CORS", async () => {
+  const r = await getJson("/tickets");
+  assert.equal(r.status, 200);
+  assert.ok(r.body.includes(SECRET), "el secreto está inyectado en la página");
+  assert.ok(!r.body.includes("__SHARED_SECRET__"));
+  assert.equal(r.headers["access-control-allow-origin"], undefined);
+  assert.equal((await getJson("/tickets", "evil.example.com")).status, 403);
+  assert.equal((await getJson("/api/tickets", "evil.example.com")).status, 403);
+});
+
+test("responder desde la consola: insertar → el listener lo toma → queda en el hilo; enviar exige lo insertado", async () => {
+  const id = (await post(flames({ caseId: "msg-resp-1", messageKey: "k-r1", messageId: "m-resp-1", author: "AM Luis Soto" }))).json.ticket.id;
+  const texto = "Hello Luis, May I know in which park are you located, please?";
+  assert.equal((await post({ action: "ticket_reply", ticketId: id, text: texto, mode: "send" })).status, 400, "sin insertar no se envía");
+  const ins = await post({ action: "ticket_reply", ticketId: id, text: texto, mode: "insert" });
+  assert.equal(ins.status, 200);
+  const cmd = (await post({ action: "command_next", target: "connecteam" })).json.command;
+  assert.equal(cmd.id, ins.json.command.id);
+  assert.equal(cmd.type, "insert_reply");
+  assert.equal(cmd.params.messageId, "m-resp-1");
+  assert.equal((await post({ action: "command_status", id: cmd.id })).json.status, "taken");
+  assert.equal((await post({ action: "command_result", id: cmd.id, ok: true })).status, 200);
+  const t = (await getJson(`/api/tickets/${id}`)).json.ticket;
+  assert.equal(t.thread.at(-1).kind, "inserted");
+  assert.equal(t.lastInserted, texto);
+  assert.equal((await post({ action: "ticket_reply", ticketId: id, text: texto, mode: "send" })).status, 200, "ahora sí");
+  const send = (await post({ action: "command_next", target: "connecteam" })).json.command;
+  assert.equal(send.type, "send_reply");
+  await post({ action: "command_result", id: send.id, ok: false, error: "El cuadro cambió" });
+  assert.match((await getJson(`/api/tickets/${id}`)).json.ticket.thread.at(-1).text, /No se pudo enviar.*cuadro cambió/);
+});
+
+test("corregir desde la consola re-evalúa; aprobar sin condiciones se rechaza; negar cierra", async () => {
+  const id = (await post(flames({ caseId: "msg-act-1", messageKey: "k-a1", author: "C Eva Pino" }))).json.ticket.id;
+  const r = await post({ action: "ticket_reanalyze", ticketId: id, overrides: { parkKey: "tx-arlington", receiptNumber: "19402005" } });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.ticket.analysis.fields.parkCode, "TX-Arlington");
+  assert.equal((await post({ action: "ticket_action", ticketId: id, what: "approve" })).status, 400);
+  assert.equal((await post({ action: "ticket_action", ticketId: id, what: "deny" })).json.ticket.status, "denied");
+  assert.equal((await post({ action: "ticket_draft", ticketId: id, text: "borrador" })).status, 200);
+  assert.equal((await getJson(`/api/tickets/${id}`)).json.ticket.draft, "borrador");
+});
+
+test("las acciones de la consola exigen el secreto", async () => {
+  for (const action of ["ticket_reply", "ticket_action", "ticket_reanalyze", "command_next", "command_result"]) {
+    assert.equal((await request({ method: "POST", p: "/", body: { action }, secret: "otro" })).status, 401, action);
+  }
+});
+
+test("los logs registran lo hecho desde la consola (insertar, corregir, negar)", async () => {
+  const id = (await post(flames({ caseId: "msg-log-1", messageKey: "k-l1", messageId: "m-l1", author: "M Rita Gil" }))).json.ticket.id;
+  await post({ action: "ticket_reply", ticketId: id, text: "Hello Rita, ok", mode: "insert" });
+  const cmd = (await post({ action: "command_next", target: "connecteam" })).json.command;
+  await post({ action: "command_result", id: cmd.id, ok: true });
+  await post({ action: "ticket_action", ticketId: id, what: "deny" });
+  const logs = (await getJson(`/api/tickets/${id}`)).json.logs;
+  assert.ok(logs.some((e) => /insertada en Connecteam desde la consola/.test(e.title)));
+  assert.ok(logs.some((e) => /negó el pedido desde la consola/.test(e.title)));
 });

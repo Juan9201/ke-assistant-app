@@ -122,3 +122,28 @@ export function createLog(meta = {}, { dir = DEFAULT_DIR } = {}) {
     },
   };
 }
+
+/** Eventos de UN caso (por su caseId): lee solo las líneas que lo mencionan, sin armar todos los casos. */
+export function loadCaseEvents(caseIds, dir = DEFAULT_DIR) {
+  const ids = (Array.isArray(caseIds) ? caseIds : [caseIds]).filter(Boolean);
+  if (!ids.length) return [];
+  let files = [];
+  try {
+    files = fs.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).sort();
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const f of files) {
+    for (const line of fs.readFileSync(path.join(dir, f), "utf8").split("\n")) {
+      if (!line || !ids.some((id) => line.includes(id))) continue;
+      try {
+        const rec = JSON.parse(line);
+        if (ids.includes(rec.caseId)) out.push(rec);
+      } catch {
+        /* línea dañada: se ignora */
+      }
+    }
+  }
+  return out.sort((a, b) => a.ts.localeCompare(b.ts) || a.seq - b.seq);
+}

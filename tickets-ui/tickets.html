@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KE Assistant — Tickets</title>
+<style>
+  :root {
+    --bg: #f6f8fa; --panel: #ffffff; --line: #d0d7de; --text: #1f2328; --muted: #656d76; --accent: #1f6feb;
+    --ok: #1a7f37; --okbg: #dafbe1; --warn: #9a6700; --warnbg: #fff8c5; --bad: #cf222e; --badbg: #ffebe9; --soft: #ddf4ff;
+    --bubble: #eef2f6; --mine: #e8f0fe;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0d1117; --panel: #161b22; --line: #30363d; --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+      --ok: #3fb950; --okbg: #12261a; --warn: #d29922; --warnbg: #2a2208; --bad: #f85149; --badbg: #2d1215; --soft: #10243a;
+      --bubble: #1c2128; --mine: #12233b; }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; display: flex; flex-direction: column; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 16px; margin: 0; }
+  .grow { flex: 1; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); display: inline-block; }
+  .dot.on { background: var(--ok); } .dot.off { background: var(--bad); }
+  input, select, textarea, button { font: inherit; color: inherit; }
+  input[type=search], select.sm { padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+  button { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+  button:hover:not(:disabled) { background: var(--bubble); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.go { background: var(--ok); color: #fff; border-color: var(--ok); font-weight: 600; }
+  button.danger { background: var(--bad); color: #fff; border-color: var(--bad); }
+  main { flex: 1; min-height: 0; display: grid; grid-template-columns: 300px minmax(0, 1fr) 340px; }
+  .col { min-height: 0; overflow-y: auto; }
+  #side { border-right: 1px solid var(--line); background: var(--panel); }
+  #logs { border-left: 1px solid var(--line); background: var(--panel); padding: 10px; }
+  #center { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+  .item { padding: 9px 12px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .item:hover { background: var(--bubble); }
+  .item.sel { background: var(--soft); border-left: 3px solid var(--accent); padding-left: 9px; }
+  .item .top { display: flex; align-items: center; gap: 6px; }
+  .item .num { font-weight: 700; }
+  .item .who { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .snip { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .meta { color: var(--muted); font-size: 11px; display: flex; gap: 8px; }
+  .item.upd .num::after { content: " ●"; color: var(--accent); }
+  .chip { font-size: 11px; padding: 1px 8px; border-radius: 10px; background: var(--bubble); white-space: nowrap; }
+  .st-new { background: var(--soft); } .st-waiting_staff { background: var(--warnbg); color: var(--warn); }
+  .st-needs_rectification { background: var(--warnbg); color: var(--warn); } .st-ready_for_approval { background: var(--okbg); color: var(--ok); }
+  .st-escalated { background: var(--badbg); color: var(--bad); } .st-denied { background: var(--badbg); color: var(--bad); }
+  .st-approved { background: var(--okbg); color: var(--ok); } .st-resolved { background: var(--bubble); color: var(--muted); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+  .card h3 { margin: 0 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .head h2 { margin: 0; font-size: 18px; }
+  .muted { color: var(--muted); } .small { font-size: 12px; }
+  .msg { max-width: 640px; padding: 8px 12px; border-radius: 12px; background: var(--bubble); margin-bottom: 8px; }
+  .msg.juan { background: var(--mine); margin-left: auto; } .msg.system { background: var(--badbg); }
+  .msg .by { font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+  .msg .txt { white-space: pre-wrap; word-break: break-word; }
+  .imgs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .imgs img { max-width: 220px; max-height: 180px; border-radius: 8px; border: 1px solid var(--line); cursor: zoom-in; }
+  .imgs .noimg { font-size: 12px; color: var(--muted); }
+  .proposal { border-left: 3px solid var(--accent); }
+  .understood { background: var(--soft); border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; }
+  .fields { display: grid; grid-template-columns: 90px 1fr auto; gap: 6px 8px; align-items: center; }
+  .fields input, .fields select { width: 100%; padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+  .fields .bad { border-color: var(--bad); background: var(--badbg); }
+  .src { font-size: 11px; color: var(--muted); }
+  ul.plain { margin: 6px 0 0; padding-left: 18px; } ul.plain.nolist { list-style: none; padding-left: 0; }
+  .t-bad { color: var(--bad); } .t-warn { color: var(--warn); } .t-ok { color: var(--ok); } .t-muted { color: var(--muted); }
+  .ev li { padding: 1px 0; } .ev .fail { color: var(--bad); font-weight: 600; } .ev .ok { color: var(--ok); } .ev .warn { color: var(--warn); }
+  .verdict { margin-top: 6px; padding: 8px; border-radius: 8px; font-weight: 600; }
+  .verdict.A { background: var(--okbg); color: var(--ok); } .verdict.B { background: var(--warnbg); color: var(--warn); } .verdict.escalate { background: var(--badbg); color: var(--bad); }
+  textarea.reply { width: 100%; min-height: 84px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); resize: vertical; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+  .cmd { margin-top: 6px; font-size: 13px; }
+  .ev-item { border-left: 3px solid var(--line); padding: 4px 8px; margin: 0 0 6px; background: var(--bg); border-radius: 0 6px 6px 0; }
+  .ev-item .t { display: flex; justify-content: space-between; gap: 6px; }
+  .ev-item .k { font-size: 10px; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+  .ev-item details summary { cursor: pointer; color: var(--muted); font-size: 12px; }
+  .ev-item pre { margin: 4px 0 0; font-size: 11px; white-space: pre-wrap; word-break: break-word; max-height: 160px; overflow: auto; }
+  .k-error, .k-escalation { border-left-color: var(--bad); } .k-check, .k-decision { border-left-color: var(--warn); }
+  .k-reply, .k-approval { border-left-color: var(--ok); } .k-input { border-left-color: var(--accent); } .k-vision, .k-thought { border-left-color: #8250df; }
+  .empty { padding: 40px; text-align: center; color: var(--muted); }
+  @media (max-width: 1150px) { main { grid-template-columns: 260px minmax(0, 1fr); } #logs { display: none; } }
+  @media (max-width: 760px) { main { grid-template-columns: 1fr; } #side { max-height: 36vh; border-right: 0; border-bottom: 1px solid var(--line); } }
+</style>
+</head>
+<body>
+<header>
+  <h1>KE Assistant — Tickets</h1>
+  <span id="conn" title="Conexión con el servidor local"><span class="dot"></span> <span id="connTxt" class="small muted">conectando…</span></span>
+  <span class="grow"></span>
+  <select id="fStatus" class="sm" title="Filtrar por estado"></select>
+  <input id="fText" type="search" placeholder="Buscar texto, autor, recibo…" size="26">
+  <button id="sortBtn" title="Cambiar el orden de la lista">Más recientes primero</button>
+  <a href="/logs" target="_blank" class="small">Ver todos los logs ↗</a>
+</header>
+<main>
+  <div id="side" class="col"></div>
+  <div id="center" class="col"><div class="empty">Elige un ticket de la lista.<br>Los pedidos de flames llegan aquí en orden de llegada.</div></div>
+  <div id="logs" class="col"><div class="empty">Los logs del caso aparecen aquí.</div></div>
+</main>
+<script>
+"use strict";
+const SECRET = "__SHARED_SECRET__"; // lo reemplaza el servidor al entregar la página (solo a Host local)
+
+/* ---------------- utilidades ---------------- */
+const $ = (id) => document.getElementById(id);
+function h(tag, attrs, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") el.className = v;
+    else if (k === "text") el.textContent = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (v !== false && v != null) el.setAttribute(k, v === true ? "" : v);
+  }
+  for (const c of children.flat()) if (c != null && c !== false) el.append(c.nodeType ? c : document.createTextNode(String(c)));
+  return el;
+}
+const store = {
+  get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* sin almacenamiento: la página sigue funcionando */ } },
+};
+async function api(action, payload) {
+  const r = await fetch("/", { method: "POST", headers: { "Content-Type": "application/json", "X-Shared-Secret": SECRET }, body: JSON.stringify({ action, ...payload }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+  return j;
+}
+const getJson = async (u) => { const r = await fetch(u, { cache: "no-store" }); if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); };
+const fmtTime = (ts) => {
+  const d = new Date(ts), now = new Date();
+  const hm = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return d.toDateString() === now.toDateString() ? hm : `${d.toLocaleDateString([], { day: "2-digit", month: "short" })} ${hm}`;
+};
+const STATUS = {
+  new: "Nuevo", waiting_staff: "Esperando al staff", needs_rectification: "Rectificar (caso B)", ready_for_approval: "Listo para aprobar",
+  escalated: "Escalado", denied: "Negado", approved: "Aprobado", resolved: "Resuelto",
+};
+const PROTOCOL = { test_card: "Test card · $10 = 50 flames", receipt: "Con recibo (Gravity → Amusement)", out_of_scope: "Fuera de alcance → se escala" };
+const SRC_LABEL = { texto: "del texto", foto: "de la foto", gravity: "de Gravity", lista: "de la lista de la KB", corregido: "corregido por una persona", "foto+gravity": "foto confirmada por Gravity" };
+const VERDICT = {
+  A: "Caso A: Gravity tiene los flames y la tarjeta coincide → falló la carga en Amusement (se resuelve).",
+  B: "Caso B: el recibo o la tarjeta no coinciden → se propone pedir al staff que lo rectifique.",
+  escalate: "Fuera de lo previsto → se escala (Allow me take a look).",
+};
+
+/* ---------------- estado ---------------- */
+let tickets = [], selected = store.get("selected", null), detail = null, parks = [];
+let filterStatus = store.get("fStatus", ""), filterText = "", newestFirst = store.get("newest", true);
+const seenAt = store.get("seenAt", {});       // ticketId -> updatedAt que ya se vio (marca los ticket con novedades)
+const drafts = {};                            // ticketId -> texto que se está escribiendo (no se pisa al refrescar)
+const cmdState = {};                          // ticketId -> { id, type, status, error }
+let editing = false;                          // hay un campo con foco: no se re-dibuja encima
+
+/* ---------------- lista ---------------- */
+function renderSide() {
+  const q = filterText.toLowerCase();
+  let list = tickets.filter((t) => (!filterStatus || t.status === filterStatus) && (!q || `${t.author} ${t.snippet} ${t.receiptNumber || ""} ${t.parkCode || ""} T${t.number}`.toLowerCase().includes(q)));
+  list = list.slice().sort((a, b) => (newestFirst ? b.number - a.number : a.number - b.number));
+  const side = $("side");
+  side.replaceChildren(
+    ...(list.length ? list.map(itemEl) : [h("div", { class: "empty", text: tickets.length ? "Ningún ticket coincide con el filtro." : "Aún no hay tickets. Llegarán cuando alguien pida flames en Gravity Support." })]),
+  );
+}
+function itemEl(t) {
+  const upd = seenAt[t.id] != null && seenAt[t.id] < t.updatedAt && t.id !== selected;
+  return h("div", { class: `item${t.id === selected ? " sel" : ""}${upd || seenAt[t.id] == null ? " upd" : ""}`, onclick: () => select(t.id) },
+    h("div", { class: "top" }, h("span", { class: "num", text: `#${t.number}` }), h("span", { class: "who", text: t.author || "Desconocido" }), h("span", { class: `chip st-${t.status}`, text: STATUS[t.status] || t.status })),
+    h("div", { class: "snip", text: t.snippet }),
+    h("div", { class: "meta" }, h("span", { text: fmtTime(t.createdAt) }), t.parkCode && h("span", { text: t.parkCode }), t.receiptNumber && h("span", { text: `#${t.receiptNumber}` }), t.messages > 1 && h("span", { text: `${t.messages} mensajes` }), t.hasImages && h("span", { text: "📷" })));
+}
+function renderFilters() {
+  const sel = $("fStatus");
+  const counts = {};
+  for (const t of tickets) counts[t.status] = (counts[t.status] || 0) + 1;
+  const prev = filterStatus;
+  sel.replaceChildren(h("option", { value: "", text: `Todos (${tickets.length})` }), ...Object.keys(STATUS).filter((s) => counts[s]).map((s) => h("option", { value: s, text: `${STATUS[s]} (${counts[s]})` })));
+  sel.value = prev;
+  $("sortBtn").textContent = newestFirst ? "Más recientes primero" : "Orden de llegada (antiguos primero)";
+}
+
+/* ---------------- ticket elegido ---------------- */
+async function select(id) {
+  selected = id; store.set("selected", id);
+  const t = tickets.find((x) => x.id === id);
+  if (t) { seenAt[id] = t.updatedAt; store.set("seenAt", seenAt); }
+  detail = null;
+  renderSide();
+  await loadDetail(true);
+}
+async function loadDetail(force = false) {
+  if (!selected) return;
+  try {
+    const d = await getJson(`/api/tickets/${selected}`);
+    const sig = JSON.stringify([d.ticket.updatedAt, d.logs.length, cmdState[selected] && cmdState[selected].status]);
+    if (!force && detail && detail.sig === sig) return;
+    detail = { ...d, sig };
+    seenAt[selected] = d.ticket.updatedAt; store.set("seenAt", seenAt);
+    if (!editing || force) renderCenter();
+    renderLogs();
+  } catch (e) {
+    if (/404/.test(e.message)) { selected = null; detail = null; $("center").replaceChildren(h("div", { class: "empty", text: "Ese ticket ya no existe." })); }
+  }
+}
+
+function renderCenter() {
+  const { ticket: t } = detail;
+  const a = t.analysis;
+  const c = $("center");
+  c.replaceChildren(headCard(t), threadCard(t), a ? understoodCard(t, a) : null, a && a.evidence && a.evidence.length ? evidenceCard(a) : null, replyCard(t, a), actionCard(t, a));
+}
+
+function headCard(t) {
+  const a = t.analysis;
+  return h("div", { class: "head" }, h("h2", { text: `#${t.number} · ${t.author || "Desconocido"}` }), h("span", { class: `chip st-${t.status}`, text: STATUS[t.status] || t.status }),
+    a && a.fields && a.fields.parkCode && h("span", { class: "chip", text: a.fields.parkCode }), h("span", { class: "muted small", text: `${t.channel} · ${fmtTime(t.createdAt)} · caso ${t.caseId.slice(0, 18)}` }));
+}
+
+function threadCard(t) {
+  const items = [
+    ...t.messages.map((m) => ({ ts: m.ts, el: staffMsg(t, m) })),
+    ...t.thread.map((x) => ({ ts: x.ts, el: threadMsg(x) })),
+  ].sort((x, y) => x.ts - y.ts);
+  return h("div", { class: "card" }, h("h3", { text: "Conversación" }), ...items.map((i) => i.el));
+}
+function staffMsg(t, m) {
+  return h("div", { class: "msg" }, h("div", { class: "by", text: `${t.author} · ${fmtTime(m.ts)}` }), m.text && h("div", { class: "txt", text: m.text }),
+    m.images.length > 0 && h("div", { class: "imgs" }, ...m.images.map((u) => {
+      const img = h("img", { src: u, alt: "foto del staff", loading: "lazy", referrerpolicy: "no-referrer", title: "Clic para abrir en otra pestaña", onclick: () => window.open(u, "_blank", "noopener") });
+      img.addEventListener("error", () => img.replaceWith(h("a", { class: "noimg", href: u, target: "_blank", rel: "noopener", text: "📷 foto (abrir)" })));
+      return img;
+    })));
+}
+function threadMsg(x) {
+  const who = x.role === "juan" ? (x.kind === "sent" ? "Respuesta enviada en Connecteam" : "Respuesta insertada en Connecteam") : "Aviso";
+  return h("div", { class: `msg ${x.role}` }, h("div", { class: "by", text: `${who} · ${fmtTime(x.ts)}` }), h("div", { class: "txt", text: x.text }));
+}
+
+/* ---------------- lo que entendió + datos editables ---------------- */
+function understoodCard(t, a) {
+  const f = a.fields || {};
+  const oos = a.protocol === "out_of_scope", test = a.protocol === "test_card";
+  const edits = {};
+  let timer = null;
+  const send = () => {
+    const overrides = { ...edits };
+    for (const k of Object.keys(edits)) delete edits[k];
+    api("ticket_reanalyze", { ticketId: t.id, overrides }).then(() => loadDetail(true)).catch((e) => alert(`No se pudo aplicar: ${e.message}`));
+  };
+  const touch = (key, get) => (ev) => { edits[key] = get(ev.target); clearTimeout(timer); timer = setTimeout(send, 700); };
+  const src = (s) => (s ? h("span", { class: "src", text: SRC_LABEL[s] || s }) : h("span"));
+  const input = (key, val, opts = {}) => h("input", { type: opts.type || "text", value: val ?? "", placeholder: opts.ph || "", disabled: opts.disabled || false, class: opts.bad ? "bad" : "", onfocus: () => (editing = true), onblur: () => (editing = false), oninput: touch(key, (el) => (opts.num ? (el.value === "" ? "" : Number(el.value)) : el.value)) });
+  const park = h("select", { class: !f.parkKey || f.locationId == null ? "bad" : "", onfocus: () => (editing = true), onblur: () => (editing = false), onchange: touch("parkKey", (el) => el.value) },
+    h("option", { value: "", text: "— elegir —" }), ...parks.map((p) => h("option", { value: p.key, text: p.code, selected: p.key === f.parkKey })));
+  const rows = oos ? [] : [
+    ["Parque", park, src(f.parkSource)],
+    ["Tarjeta", input("card", f.card, { ph: "10 dígitos", bad: !f.card || !f.cardConfirmed }), h("span", { class: "src", text: f.card ? (f.cardConfirmed ? "" : "sin confirmar") : "" })],
+    !test && ["Recibo #", input("receiptNumber", f.receiptNumber, { ph: "Receipt Number", bad: !f.receiptNumber || !f.receiptConfirmed }), src(f.receiptSource)],
+    ["Flames", input("flames", f.flames, { type: "number", num: true, disabled: test, ph: "se leerá del recibo" }), src(f.flamesSource)],
+    ["Monto $", input("amountUsd", f.amountUsd, { type: "number", num: true, disabled: test, ph: "se leerá del recibo" }), h("span")],
+  ].filter(Boolean);
+  return h("div", { class: "card" }, h("h3", { text: "Qué entendió el asistente" }),
+    h("div", { class: "understood", text: a.understood }), h("div", { class: "small muted", text: PROTOCOL[a.protocol] || "" }),
+    rows.length > 0 && h("div", { class: "fields", style: "margin-top:8px" }, ...rows.flatMap(([label, el, s]) => [h("span", { text: label }), el, s])),
+    a.blockers.length > 0 && h("ul", { class: "plain t-bad" }, ...a.blockers.map((b) => h("li", { text: b }))),
+    (a.warnings || []).length > 0 && h("ul", { class: "plain nolist t-warn" }, ...a.warnings.map((w) => h("li", { text: `⚠ ${w}` }))),
+    a.pendingChecks.length > 0 && h("ul", { class: "plain nolist t-muted" }, ...a.pendingChecks.map((p) => h("li", { text: `⏳ ${p}` }))));
+}
+
+function evidenceCard(a) {
+  return h("div", { class: "card" }, h("h3", { text: "Evidencia leída en Gravity (solo lectura)" }),
+    h("ul", { class: "plain nolist ev" }, ...a.evidence.map((c) => h("li", { class: c.status }, `${c.status === "ok" ? "✓" : c.status === "fail" ? "✗" : "·"} ${c.label}${c.detail ? " — " + c.detail : ""}`))),
+    VERDICT[a.verdict] && h("div", { class: `verdict ${a.verdict}`, text: VERDICT[a.verdict] }));
+}
+
+/* ---------------- responder en Connecteam ---------------- */
+function replyCard(t, a) {
+  const proposed = (a && a.reply) || "";
+  const cmd = cmdState[t.id];
+  const ta = h("textarea", { class: "reply", placeholder: "Escribe la respuesta al staff (en inglés, nombrándolo)…", onfocus: () => (editing = true), onblur: () => { editing = false; api("ticket_draft", { ticketId: t.id, text: ta.value }).catch(() => {}); },
+    oninput: () => { drafts[t.id] = ta.value; } });
+  ta.value = drafts[t.id] ?? t.draft ?? proposed;
+  const busy = cmd && (cmd.status === "pending" || cmd.status === "taken");
+  const status = h("div", { class: "cmd" });
+  const paint = () => {
+    if (!cmd) { status.textContent = ""; return; }
+    const m = { pending: ["t-warn", "Esperando a Connecteam… (¿está abierto el chat Gravity Support con el listener?)"], taken: ["t-warn", cmd.type === "send_reply" ? "Enviando en Connecteam…" : "Insertando en Connecteam…"],
+      done: ["t-ok", cmd.type === "send_reply" ? "✓ Enviada en Connecteam." : "✓ Insertada en Connecteam, citando el mensaje del staff. Revísala allí; no se envió."],
+      failed: ["t-bad", `✗ ${cmd.error || "No se pudo"}`], expired: ["t-bad", "✗ Connecteam no respondió a tiempo: abre el chat Gravity Support (con el listener instalado) y reintenta."] }[cmd.status] || ["", cmd.status];
+    status.className = `cmd ${m[0]}`; status.textContent = m[1];
+  };
+  paint();
+  const run = async (mode) => {
+    const text = ta.value.trim();
+    if (!text) return alert("La respuesta está vacía.");
+    if (mode === "send" && !confirm(`¿Enviar este mensaje en Connecteam a ${t.author}?\n\n"${text}"\n\nSe enviará en el chat Gravity Support, citando su mensaje.`)) return;
+    try {
+      const r = await api("ticket_reply", { ticketId: t.id, text, mode });
+      cmdState[t.id] = { id: r.command.id, type: r.command.type, status: "pending" };
+      drafts[t.id] = text;
+      pollCommand(t.id);
+      renderCenter();
+    } catch (e) { alert(e.message); }
+  };
+  const canSend = t.lastInserted && t.lastInserted === ta.value.trim();
+  return h("div", { class: "card" }, h("h3", { text: "Respuesta al staff" }),
+    a && a.replyKind && h("div", { class: "small muted", style: "margin-bottom:6px", text: { question: "El asistente propone preguntar lo que falta:", mismatch: "El asistente propone pedir que rectifiquen:", escalation: "El asistente propone escalar:" }[a.replyKind] || "" }),
+    ta,
+    h("div", { class: "row" },
+      h("button", { class: "primary", disabled: busy, title: "Pega la respuesta en el cuadro de Connecteam como respuesta citando su mensaje. NO la envía.", onclick: () => run("insert"), text: `Insertar en Connecteam (citando a ${(t.author || "").split(" ").slice(-1)[0] || "staff"})` }),
+      h("button", { disabled: busy || !canSend, title: canSend ? "Envía en Connecteam lo que ya insertaste" : "Primero inserta esta respuesta en Connecteam; solo se envía el texto ya insertado", onclick: () => run("send"), text: "Enviar en Connecteam" }),
+      h("button", { disabled: !proposed || ta.value === proposed, onclick: () => { ta.value = proposed; drafts[t.id] = proposed; }, text: "Restablecer a lo propuesto" })),
+    status,
+    h("div", { class: "small muted", style: "margin-top:6px", text: "Insertar no envía nada: la respuesta queda en el cuadro de Connecteam, citando al staff, para que la revises. Enviar es una decisión tuya." }));
+}
+async function pollCommand(ticketId) {
+  const st = cmdState[ticketId];
+  if (!st) return;
+  for (let i = 0; i < 90; i++) {
+    await new Promise((r) => setTimeout(r, 1500));
+    if (cmdState[ticketId] !== st) return;
+    try {
+      const s = await api("command_status", { id: st.id });
+      st.status = s.status; st.error = s.error || "";
+      if (selected === ticketId && !editing) renderCenter();
+      if (["done", "failed", "expired"].includes(s.status)) { loadDetail(true); return; }
+    } catch { return; }
+  }
+}
+
+/* ---------------- aprobar / negar / resolver ---------------- */
+function actionCard(t, a) {
+  const closed = ["denied", "approved", "resolved"].includes(t.status);
+  const act = async (what, msg) => {
+    if (msg && !confirm(msg)) return;
+    try { await api("ticket_action", { ticketId: t.id, what }); await loadDetail(true); } catch (e) { alert(e.message); }
+  };
+  const can = a && a.canApprove && !closed;
+  return h("div", { class: "card" }, h("h3", { text: "Decisión" }),
+    h("div", { class: "row", style: "margin-top:0" },
+      h("button", { class: "go", disabled: !can, title: can ? "Aprueba el protocolo completo" : (a && (a.blockers[0] || a.pendingChecks[0])) || "Todavía no se puede aprobar", onclick: (ev) => { if (!ev.isTrusted) return; act("approve", "¿Aprobar el protocolo de este pedido?"); }, text: "Aprobar y ejecutar" }),
+      h("button", { disabled: closed, onclick: () => act("deny", "¿Negar este pedido?"), text: "Negar" }),
+      closed ? h("button", { onclick: () => act("reopen"), text: "Reabrir" }) : h("button", { onclick: () => act("resolve", "¿Marcar este ticket como resuelto?"), text: "Marcar resuelto" })),
+    h("div", { class: "small muted", style: "margin-top:6px", text: closed ? `Ticket ${STATUS[t.status].toLowerCase()}.` : "El botón verde se habilita cuando están completos los datos, la lectura de Gravity y la revisión de Amusement (esta última aún no está conectada)." }));
+}
+
+/* ---------------- logs del caso ---------------- */
+function renderLogs() {
+  const box = $("logs");
+  if (!detail) return;
+  const ev = detail.logs;
+  box.replaceChildren(h("div", { class: "small muted", style: "margin-bottom:8px", text: `Logs del caso (${ev.length} eventos) — qué entendió, leyó, validó y decidió` }),
+    ...ev.map((e) => h("div", { class: `ev-item k-${e.kind}` },
+      h("div", { class: "t" }, h("strong", { text: e.title || e.kind }), h("span", { class: "k", text: `${e.kind} · ${new Date(e.ts).toLocaleTimeString()}` })),
+      e.detail && h("div", { class: "small", style: "white-space:pre-wrap", text: String(e.detail).slice(0, 600) }),
+      e.data && h("details", {}, h("summary", { text: "datos" }), h("pre", { text: JSON.stringify(e.data, null, 1).slice(0, 2500) })))));
+  box.scrollTop = box.scrollHeight;
+}
+
+/* ---------------- ciclo ---------------- */
+async function tick() {
+  try {
+    const d = await getJson("/api/tickets");
+    $("conn").querySelector(".dot").className = "dot on"; $("connTxt").textContent = "en vivo";
+    const sig = JSON.stringify(d.tickets.map((t) => [t.id, t.updatedAt, t.status]));
+    if (tick.sig !== sig) { tickets = d.tickets; tick.sig = sig; renderFilters(); if (!editing) renderSide(); }
+    if (selected && !tickets.some((t) => t.id === selected) && tickets.length) { /* sigue mostrando el detalle */ }
+    await loadDetail();
+  } catch {
+    $("conn").querySelector(".dot").className = "dot off"; $("connTxt").textContent = "sin conexión con el servidor";
+  }
+}
+$("fStatus").addEventListener("change", (e) => { filterStatus = e.target.value; store.set("fStatus", filterStatus); renderSide(); });
+$("fText").addEventListener("input", (e) => { filterText = e.target.value; renderSide(); });
+$("sortBtn").addEventListener("click", () => { newestFirst = !newestFirst; store.set("newest", newestFirst); renderFilters(); renderSide(); });
+
+(async () => {
+  try { parks = (await api("list_parks")).parks || []; } catch { /* sin lista: el selector queda con lo que traiga el ticket */ }
+  await tick();
+  if (selected && tickets.some((t) => t.id === selected)) await select(selected);
+  setInterval(tick, 2000);
+})();
+</script>
+</body>
+</html>
