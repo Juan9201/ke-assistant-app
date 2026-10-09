@@ -78,6 +78,22 @@ export function createFlowLogger({ dir } = {}) {
       );
     },
 
+    /** La consulta se pidió (aunque nadie la atienda todavía). */
+    onLookupRequested(caseId, { system, kind, params }) {
+      if (!caseId) return;
+      const { log } = logFor(caseId, {});
+      log.add("action", `${system === "gravity" ? "Gravity" : "Amusement"} · se pidió una lectura (solo lectura)`, JSON.stringify(params), { system, where: `cola de consultas · ${kind}`, query: JSON.stringify(params) });
+    },
+
+    /** La consulta falló, caducó o el lector devolvió un error: se dice por qué, en vez de quedar en silencio. */
+    onLookupFailed(caseId, { system, status, error }) {
+      if (!caseId) return;
+      const { log } = logFor(caseId, {});
+      const nombre = system === "gravity" ? "Gravity" : "Amusement";
+      const motivo = status === "expired" ? `Nadie atendió la consulta a tiempo: ¿está abierta una pestaña de ${nombre} con sesión y el lector instalado?` : error || "El lector devolvió un error";
+      log.add("error", `${nombre} · no se pudo hacer la lectura`, motivo, { system, status });
+    },
+
     /** Registra la consulta de solo lectura a Gravity y su resultado (sin datos personales). */
     onGravity(caseId, { receiptNumber, gravity, evaluation }) {
       if (!caseId) return;

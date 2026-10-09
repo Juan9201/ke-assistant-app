@@ -211,3 +211,18 @@ test("el listener se entrega con el secreto inyectado por el servidor (el archiv
   const enRepo = fs.readFileSync(path.join(HERE, "..", "userscript", "connecteam-listener-v2.user.js"), "utf8");
   assert.ok(enRepo.includes('SHARED_SECRET: "__SHARED_SECRET__"'), "el archivo del repo lleva el marcador");
 });
+
+test("los logs registran la consulta pedida y el error del lector (se ven en /api/logs)", async () => {
+  const caseId = "prueba-lk-log";
+  const c = await post({ action: "lookup_create", caseId, system: "gravity", kind: "transaction", params: { receiptNumber: "19400077" } });
+  await post({ action: "lookup_create", caseId, system: "gravity", kind: "transaction", params: { receiptNumber: "19400077" } }); // repetida: no duplica el evento
+  const job = (await post({ action: "lookup_next", system: "gravity" })).json.job;
+  assert.equal(job.id, c.json.job.id);
+  await post({ action: "lookup_result", id: job.id, ok: false, error: "La sesión de Gravity caducó" });
+  const api = JSON.parse((await request({ p: "/api/logs" })).body);
+  const caso = api.cases.find((x) => x.id === caseId);
+  assert.ok(caso, "el caso aparece en los logs");
+  const kinds = caso.events.map((e) => e.kind);
+  assert.equal(kinds.filter((k) => k === "action").length, 1, "una sola consulta pedida");
+  assert.ok(caso.events.some((e) => e.kind === "error" && /sesión de Gravity caducó/.test(e.detail)));
+});

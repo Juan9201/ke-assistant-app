@@ -114,6 +114,8 @@
 
   const firstInput = (c) => c.events.find((e) => e.kind === "input");
   const startTs = (c) => (c.events[0] ? c.events[0].ts : "");
+  // Un caso abierto aún no tiene meta de cierre: el autor se toma del mensaje recibido.
+  const metaOf = (c) => (c.end && c.end.meta) || { author: ((c.events.find((e) => e.kind === "input") || {}).data || {}).author || "" };
   const outcomeOf = (c) => (c.end ? c.end.outcome : "");
   const label = { answered: "Respondido", asked_missing_data: "Pidió datos", prepared_for_human: "Preparado", executed: "Ejecutado", denied: "Negado", escalated: "Escalado", error: "Error", "": "Abierto" };
 
@@ -142,7 +144,7 @@
       const top = document.createElement("div");
       top.className = "top";
       const who = document.createElement("span");
-      const meta = (c.end && c.end.meta) || {};
+      const meta = metaOf(c);
       who.textContent = `${meta.author || "—"} · ${new Date(startTs(c)).toLocaleString()}`;
       const b = document.createElement("span");
       b.className = "badge o-" + outcomeOf(c);
@@ -244,7 +246,7 @@
     const box = $("detail");
     box.textContent = "";
     $("export").disabled = false;
-    const meta = (c.end && c.end.meta) || {};
+    const meta = metaOf(c);
     const h = document.createElement("h2");
     h.textContent = `Caso ${c.id}`;
     const sub = document.createElement("div");

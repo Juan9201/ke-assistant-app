@@ -71,3 +71,16 @@ test("los secretos no entran a los logs", () => {
   f.onPanelEvent({ caseId: "s1", kind: "error", title: "t", data: { apiKey: "SECRETO-123" } });
   assert.ok(!fs.readFileSync(path.join(dir, fs.readdirSync(dir)[0]), "utf8").includes("SECRETO-123"));
 });
+
+test("la consulta pedida y la que falla o caduca quedan en el log, con el motivo (antes quedaban en silencio)", () => {
+  const dir = tmp();
+  const f = createFlowLogger({ dir });
+  f.onLookupRequested("lk-1", { system: "gravity", kind: "transaction", params: { receiptNumber: "19400001" } });
+  f.onLookupFailed("lk-1", { system: "gravity", status: "expired" });
+  f.onLookupFailed("lk-1", { system: "gravity", status: "error", error: "La sesión de Gravity caducó" });
+  const ev = loadLogs(dir)[0].events;
+  assert.deepEqual(ev.map((e) => e.kind), ["action", "error", "error"]);
+  assert.equal(ev[0].data.system, "gravity");
+  assert.match(ev[1].detail, /pestaña de Gravity con sesión/);
+  assert.match(ev[2].detail, /sesión de Gravity caducó/);
+});

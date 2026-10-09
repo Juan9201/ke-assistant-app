@@ -59,6 +59,7 @@ const rememberVision = (caseId, result) => {
 };
 // Consultas de solo lectura a Gravity/Amusement: las toma el lector que corre en tu pestaña (el servidor no tiene tu sesión).
 const lookups = createLookupStore();
+const expiredLogged = new Set(); // consultas caducadas que ya se registraron
 const gravityByCase = new Map(); // caseId -> lectura normalizada del recibo (sin datos personales)
 const rememberGravity = (caseId, g) => {
   gravityByCase.delete(caseId);
@@ -251,6 +252,13 @@ const server = http.createServer(async (req, res) => {
     if (body.action === "lookup_create") {
       const r = lookups.create({ system: body.system, kind: body.kind, params: body.params || {}, caseId: String(body.caseId || "").slice(0, 120) });
       if (!r.ok) throw new HttpError(400, r.error);
+      if (!r.reused && r.job.caseId) {
+        try {
+          flowLog.onLookupRequested(r.job.caseId, r.job);
+        } catch (err) {
+          console.error("No se pudo escribir el log de la consulta:", err.message);
+        }
+      }
       sendJson(res, 200, headers, r);
       return;
     }
@@ -265,6 +273,13 @@ const server = http.createServer(async (req, res) => {
       if (body.ok && job.system === "gravity" && job.kind === "transaction") data = normalizeGravity(body.data); // lista blanca: nunca datos personales
       const r = lookups.complete(job.id, { ok: !!body.ok, data, error: body.error });
       if (!r.ok) throw new HttpError(409, r.error);
+      if (!body.ok && job.caseId) {
+        try {
+          flowLog.onLookupFailed(job.caseId, { system: job.system, status: "error", error: String(body.error || "").slice(0, 300) });
+        } catch (err) {
+          console.error("No se pudo escribir el log del error:", err.message);
+        }
+      }
       if (data && job.caseId) {
         const g = { ...data, requestedReceipt: job.params.receiptNumber };
         rememberGravity(job.caseId, g);
@@ -280,6 +295,15 @@ const server = http.createServer(async (req, res) => {
     if (body.action === "lookup_status") {
       const job = lookups.get(String(body.id || ""));
       if (!job) throw new HttpError(404, "Consulta no encontrada");
+      if (job.status === "expired" && job.caseId && !expiredLogged.has(job.id)) {
+        expiredLogged.add(job.id); // se registra una sola vez
+        if (expiredLogged.size > 500) expiredLogged.delete(expiredLogged.values().next().value);
+        try {
+          flowLog.onLookupFailed(job.caseId, { system: job.system, status: "expired" });
+        } catch (err) {
+          console.error("No se pudo escribir el log de la consulta caducada:", err.message);
+        }
+      }
       sendJson(res, 200, headers, { id: job.id, status: job.status, error: job.error });
       return;
     }
