@@ -1,11 +1,15 @@
 // ==UserScript==
 // @name         KE Assistant — Connecteam listener v2
 // @namespace    https://github.com/Juan9201/ke-assistant
-// @version      2.0.0
+// @version      2.5.2
 // @description  Detecta mensajes nuevos en Gravity Support y sugiere una respuesta. Solo envía si tú haces clic en "Enviar".
 // @match        https://app.connecteam.com/*
 // @grant        GM_xmlhttpRequest
+// @updateURL    http://127.0.0.1:8787/userscript/connecteam-listener-v2.user.js
+// @downloadURL  http://127.0.0.1:8787/userscript/connecteam-listener-v2.user.js
 // @connect      localhost
+// @connect      127.0.0.1
+// @connect      connecteam.com
 // @connect      workers.dev
 // @run-at       document-idle
 // ==/UserScript==
@@ -23,9 +27,9 @@
     // Si en vez de eso usas el Worker de Cloudflare, pon aquí la URL que imprime
     // `npm run deploy` (algo como https://ke-assistant.tu-subdominio.workers.dev).
     BACKEND_URL: "http://localhost:8787",
-    // El mismo valor que pusiste en local-server/.env (SHARED_SECRET) o, si usas
-    // Cloudflare, el que pusiste con `wrangler secret put SHARED_SECRET`.
-    SHARED_SECRET: "PEGA_AQUI_EL_MISMO_SHARED_SECRET_DEL_BACKEND",
+    // El servidor local reemplaza __SHARED_SECRET__ por el SHARED_SECRET de local-server/.env al entregar este archivo:
+    // instálalo desde http://127.0.0.1:8787/userscript/connecteam-listener-v2.user.js (no lo copies a mano).
+    SHARED_SECRET: "__SHARED_SECRET__",
     // Nombres del equipo interno de soporte (Foxihost), tal como aparecen en el
     // chat. Sus mensajes en Gravity Support NUNCA se interpretan (ni se llama a
     // la IA) porque el equipo se coordina entre sí por Slack, no por este chat.
@@ -38,6 +42,7 @@
       "Andre Ho",
       "James Tully",
       "Pierre Goriel",
+      "Samuel Carrillo",
     ],
     // Nombre del canal (se lee del header de Connecteam) al que debe limitarse
     // el listener. "" = actuar en cualquier chat abierto.
@@ -92,7 +97,14 @@
     // Botón "Reply" de un mensaje específico. Confirmado por Juan con DevTools
     // contra el DOM real de Connecteam.
     replyButton: '[data-testid="automation-reply-message-option"]',
+    // Fotos adjuntas de un mensaje (confirmado con DevTools: .image-gallery-message img.attachment-img).
+    attachmentImg: ".image-gallery-message img.attachment-img, img.attachment-img",
   };
+
+  // Versión del "contrato" con el servidor local (forma de la respuesta de analyze_flames).
+  // Si no coincide con la del servidor, el panel avisa en vez de fallar con un error críptico.
+  const SCRIPT_VERSION = "2.5.2";
+  const EXPECTED_CONTRACT = 2;
 
   const QUIET_MS = 2500; // tiempo sin cambios para considerar que el historial terminó de cargar
   const MAX_ARM_WAIT_MS = 10000; // tope por si el DOM nunca queda quieto
@@ -165,9 +177,16 @@
     return wrapper?.getAttribute("data-message-id") || el.getAttribute("data-id") || el.id || "";
   }
 
+  function extractImages(el) {
+    return Array.from(el.querySelectorAll(SEL.attachmentImg))
+      .map((i) => i.currentSrc || i.src)
+      .filter(Boolean);
+  }
+
   function extract(el) {
     const text = extractText(el);
-    if (!text) return null;
+    const images = extractImages(el);
+    if (!text && !images.length) return null;
 
     const quoteEl = el.querySelector(SEL.replyQuote);
     const replyTo = quoteEl ? norm(quoteEl.innerText) : "";
@@ -178,7 +197,7 @@
     // necesidad de que IGNORE_AUTHORS coincida exacto con tu nombre mostrado).
     const isMe = el.classList.contains("me");
 
-    return { id: getMessageId(el), isMe, author: isMe ? "" : findAuthor(el), text, replyTo };
+    return { id: getMessageId(el), isMe, author: isMe ? "" : findAuthor(el), text, replyTo, images };
   }
 
   /** Los mensajes consecutivos del mismo autor no repiten el nombre: se busca hacia atrás. */
@@ -200,8 +219,16 @@
     return CONFIG.IGNORE_AUTHORS.some((n) => n && a === foldName(n));
   }
 
+  // Hash corto del contenido: dos mensajes distintos nunca comparten llave aunque Connecteam repita el id (se vio en casos reales).
+  function shortHash(s) {
+    let h = 5381;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+    return (h >>> 0).toString(36);
+  }
+  const contentHash = (data) => shortHash(`${data.author}|${data.replyTo}|${data.text}|${(data.images || []).length}`);
+
   function messageKey(el, data) {
-    return data.id ? `id:${data.id}` : `tx:${data.author}|${data.replyTo}|${data.text}`;
+    return data.id ? `id:${data.id}|${contentHash(data)}` : `tx:${data.author}|${data.replyTo}|${data.text}`;
   }
 
   function getChannelName() {
@@ -312,18 +339,22 @@
   /* Llamada al Worker (una por mensaje nuevo)                          */
   /* ================================================================ */
   function interpret(data) {
+    return callBackend({
+      action: "interpret",
+      message: data.text,
+      author: data.author,
+      replyTo: data.replyTo,
+    });
+  }
+
+  function callBackend(payload, timeoutMs = 35000) {
     return new Promise((resolve, reject) => {
       GM_xmlhttpRequest({
         method: "POST",
         url: CONFIG.BACKEND_URL,
         headers: { "Content-Type": "application/json", "X-Shared-Secret": CONFIG.SHARED_SECRET },
-        data: JSON.stringify({
-          action: "interpret",
-          message: data.text,
-          author: data.author,
-          replyTo: data.replyTo,
-        }),
-        timeout: 35000,
+        data: JSON.stringify(payload),
+        timeout: timeoutMs,
         onload: (res) => {
           let body = null;
           try {
@@ -347,6 +378,52 @@
       const data = queue.shift();
       setStatus("working");
       try {
+        // Texto y foto del mismo autor, cerca en el tiempo, son UN solo pedido (spec 003, R-02).
+        if (!data.forceNew) {
+          const who = foldName(data.author || "");
+          const now = Date.now();
+          if (!data.text && data.images?.length) {
+            const open = openCards.get(who);
+            if (open && now - open.ts < MERGE_WINDOW_MS && open.card.isConnected !== false) {
+              open.card.addImages(data.images); // la foto llegó después del texto: se agrega a su tarjeta
+            } else {
+              pendingPhotos.set(who, { images: data.images, ts: now }); // la foto llegó primero: espera su texto
+            }
+            continue;
+          }
+          const pend = pendingPhotos.get(who);
+          if (pend && now - pend.ts < MERGE_WINDOW_MS) {
+            data.images = [...pend.images, ...(data.images || [])];
+            pendingPhotos.delete(who);
+          }
+        }
+        // Spec 002: primero se analiza sin IA; si es un pedido de flames se muestra
+        // la tarjeta de aprobación y NO se llama al modelo.
+        let analysis;
+        try {
+          data.caseId = data.caseId || (data.id ? `msg-${data.id}-${contentHash(data)}` : `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+          analysis = await callBackend({ action: "analyze_flames", caseId: data.caseId, text: data.text, author: data.author });
+        } catch (e) {
+          throw new Error(`${e.message} (¿reiniciaste el servidor local tras actualizar?)`);
+        }
+        if (analysis.contract !== EXPECTED_CONTRACT) {
+          throw new Error(
+            `El servidor local y el userscript (v${SCRIPT_VERSION}) no son de la misma versión: reinicia el servidor y actualiza el userscript en Tampermonkey.`,
+          );
+        }
+        if (analysis.isFlameRequest) {
+          await ensureParks();
+          const flameCard = addFlameCard(data, analysis);
+          if (!data.forceNew) openCards.set(foldName(data.author || ""), { card: flameCard, ts: Date.now() });
+          if (data.images?.length) flameCard.addImages(data.images);
+          if (CONFIG.AUTO_INSERT_WHEN_EMPTY && analysis.reply) {
+            const composer = findComposer();
+            if (composer && composerIsEmpty(composer)) {
+              insertReplyToOriginal(data, analysis.reply, (ok) => ok && flameCard.markQuestionInserted());
+            }
+          }
+          continue;
+        }
         const result = await interpret(data);
         const card = addCard(data, result);
         if (CONFIG.AUTO_INSERT_WHEN_EMPTY) {
@@ -557,7 +634,7 @@
   shadow.innerHTML = `
     <style>
       :host { all: initial; }
-      .wrap { position: fixed; right: 16px; bottom: 16px; width: 340px; max-height: 70vh;
+      .wrap { position: fixed; right: 16px; bottom: 16px; width: 440px; max-height: 85vh;
         display: flex; flex-direction: column; z-index: 2147483647;
         font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; color: #1f2328;
         background: #fff; border: 1px solid #d0d7de; border-radius: 10px;
@@ -565,7 +642,8 @@
       .wrap.min .body { display: none; }
       header { display: flex; align-items: center; gap: 8px; padding: 8px 10px;
         border-bottom: 1px solid #d0d7de; cursor: default; }
-      header strong { flex: 1; }
+      header strong { flex: 1; white-space: nowrap; }
+      header button { white-space: nowrap; padding: 3px 6px; }
       .dot { width: 8px; height: 8px; border-radius: 50%; background: #8c959f; }
       .dot.listening { background: #1a7f37; }
       .dot.working { background: #bf8700; }
@@ -594,12 +672,40 @@
       .badge.case { background: #e6d9ff; }
       .actions { display: flex; gap: 6px; margin-top: 6px; }
       details { margin-top: 6px; font-size: 12px; color: #656d76; }
+      .card.flames { border-color: #1f6feb; }
+      .sec { font-weight: 600; margin: 8px 0 2px; }
+      .understood { background: #ddf4ff; border-radius: 6px; padding: 6px; }
+      .fields { display: grid; grid-template-columns: 64px 1fr; gap: 4px 8px; align-items: center; }
+      .fields input, .fields select { box-sizing: border-box; width: 100%; font: inherit; padding: 3px 6px;
+        border: 1px solid #d0d7de; border-radius: 6px; background: #fff; }
+      .fields input.bad, .fields select.bad { border-color: #cf222e; background: #ffebe9; }
+      .blockers { margin: 6px 0 0; padding-left: 18px; color: #cf222e; }
+      .steps { margin: 2px 0 0; padding-left: 20px; }
+      .evidence { margin-top: 6px; }
+      .ev-list { list-style: none; margin: 4px 0; padding: 0; font-size: 12px; }
+      .ev-list li { padding: 1px 0; }
+      .ev-ok { color: #1a7f37; } .ev-fail { color: #cf222e; font-weight: 600; } .ev-warn { color: #9a6700; }
+      .verdict { margin-top: 4px; padding: 6px; border-radius: 6px; font-weight: 600; }
+      .verdict-A { background: #dafbe1; color: #116329; } .verdict-B { background: #fff1a8; color: #7d4e00; } .verdict-escalate { background: #ffebe9; color: #a40e26; }
+      .warns { margin: 6px 0 0; padding-left: 18px; color: #9a6700; list-style: none; }
+      .pending { margin: 6px 0 0; padding-left: 18px; color: #656d76; list-style: none; }
+      .vision .photo { margin: 6px 0; }
+      .vcanvas { width: 100%; display: block; border: 1px solid #d0d7de; border-radius: 6px; margin: 4px 0; }
+      .finds { margin: 4px 0 0; padding: 0; list-style: none; font-size: 12px; }
+      .finds li { display: flex; gap: 6px; align-items: center; padding: 1px 0; cursor: pointer; }
+      .finds li span:nth-child(2) { flex: 1; }
+      .dot2 { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+      .low { color: #bf8700; font-weight: 600; }
+      .nf { color: #cf222e; font-size: 12px; margin-top: 4px; }
+      button.go { background: #1a7f37; color: #fff; border-color: #1a7f37; font-weight: 600; padding: 5px 12px; }
+      button.go:hover { background: #116329; }
     </style>
     <div class="wrap">
       <header>
         <span class="dot" id="dot"></span>
-        <strong>KE Assistant</strong>
+        <strong>KE Assistant <small style="font-weight:400;color:#656d76">v${SCRIPT_VERSION}</small></strong>
         <button id="testInsert" title="Pega un texto de prueba en el cuadro, sin enviarlo">Probar cuadro</button>
+        <button id="testPhoto" title="Lee la última foto del chat y muestra lo que ve el asistente (sin enviar nada)">Probar foto</button>
         <button id="pause" title="Pausar / reanudar">Pausar</button>
         <button id="min" title="Minimizar">–</button>
       </header>
@@ -632,6 +738,22 @@
     pendingAiComposer = composer;
     $("testInsert").textContent = "Insertado ✓";
     setTimeout(() => ($("testInsert").textContent = "Probar cuadro"), 2500);
+  });
+
+  // Prueba aislada de lectura: toma la última foto visible del chat (aunque el mensaje no sea nuevo) y muestra
+  // lo que lee el asistente. No envía nada ni toca el cuadro de texto.
+  $("testPhoto").addEventListener("click", () => {
+    const withPhoto = Array.from(document.querySelectorAll(SEL.message)).filter((m) => m.querySelector(SEL.attachmentImg));
+    const last = withPhoto[withPhoto.length - 1];
+    const btn = $("testPhoto");
+    if (!last) {
+      btn.textContent = "No hay fotos aquí";
+      setTimeout(() => (btn.textContent = "Probar foto"), 2500);
+      return;
+    }
+    const d = extract(last);
+    queue.push({ ...d, text: d.text || "play card flames (prueba de foto)", caseId: `prueba-foto-${Date.now()}`, forceNew: true });
+    processQueue();
   });
 
   function setStatus(state) {
@@ -743,6 +865,519 @@
     return card;
   }
 
+  /* ================================================================ */
+  /* Tarjeta de pedido de flames (spec 002): entendió · datos · pasos · aprobar */
+  /* ================================================================ */
+  /* ================================================================ */
+  /* Fotos del chat (spec 003): bajar · reducir · leer en el servidor · dibujar */
+  /* ================================================================ */
+  const MERGE_WINDOW_MS = 2 * 60 * 1000; // texto y foto del mismo autor dentro de este plazo son un solo pedido
+  const openCards = new Map(); // autor -> { card, ts }: tarjeta de flames abierta a la que puede llegar una foto después
+  const pendingPhotos = new Map(); // autor -> { images, ts }: foto que llegó antes que su texto
+  const DOC_TYPE_LABELS = { paper: "Ticket de papel", screen: "Pantalla de Gravity", unknown: "Tipo no identificado" };
+  const NOT_FOUND_LABELS = { receipt_number: "Receipt Number", park_header: "Parque", date: "Fecha", flames_line: "Línea de flames" };
+
+  const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  /**
+   * Las fotos del chat son miniaturas. Al hacer clic en una, Connecteam la amplía: se abre el visor, se toma la imagen
+   * más grande que aparece y se cierra. Es un intento con mejor esfuerzo (no verificado contra el DOM real del visor):
+   * si algo falla, se sigue con la miniatura.
+   */
+  async function tryLightbox(url) {
+    try {
+      const file = url.split("?")[0].split("/").pop();
+      const thumb = Array.from(document.querySelectorAll(SEL.attachmentImg)).find((i) => (i.currentSrc || i.src || "").includes(file));
+      if (!thumb) return null;
+      const baseW = thumb.naturalWidth || 0;
+      thumb.click();
+      await sleepMs(1000);
+      const bigger = Array.from(document.images)
+        .filter((i) => i !== thumb && !panelHost.contains(i) && isVisible(i) && i.naturalWidth > Math.max(baseW * 1.3, 500))
+        .sort((a, b) => b.naturalWidth - a.naturalWidth)[0];
+      const src = bigger ? bigger.currentSrc || bigger.src : null;
+      // cerrar el visor: Escape y, si hay un botón de cierre visible, también un clic
+      for (const t of [document, window, document.body]) t.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", keyCode: 27, which: 27, bubbles: true }));
+      document.querySelector('[aria-label*="close" i], [data-testid*="close" i]')?.click?.();
+      await sleepMs(300);
+      return src;
+    } catch (e) {
+      log("lightbox falló", e.message);
+      return null;
+    }
+  }
+
+  function gmGetBlob(url) {
+    return new Promise((resolve, reject) => {
+      GM_xmlhttpRequest({
+        method: "GET",
+        url,
+        responseType: "blob",
+        timeout: 20000,
+        onload: (r) => (r.status >= 200 && r.status < 300 && r.response ? resolve(r.response) : reject(new Error(`HTTP ${r.status}`))),
+        onerror: () => reject(new Error("No se pudo descargar la foto")),
+        ontimeout: () => reject(new Error("La descarga de la foto tardó demasiado")),
+      });
+    });
+  }
+
+  /** Baja la foto con la mejor resolución disponible: prueba la URL del mensaje y la variante sin "/mobile/". */
+  async function fetchBestImage(src) {
+    const urls = [...new Set([src, src.replace("/mobile/", "/")])];
+    let best = null;
+    for (const u of urls) {
+      try {
+        const bmp = await createImageBitmap(await gmGetBlob(u));
+        if (!best || bmp.width * bmp.height > best.bmp.width * best.bmp.height) best = { bmp, url: u };
+        if (best.bmp.width >= 1200) break;
+      } catch (e) {
+        log("descarga falló", u, e.message);
+      }
+    }
+    if (!best) throw new Error("No pude descargar la foto");
+    return best;
+  }
+
+  /** Reduce (o amplía si es una miniatura) y codifica en JPEG para enviarla al OCR local. */
+  function prepareUpload(bmp) {
+    const MAX = 1600;
+    const TARGET_SMALL = 1200;
+    const longest = Math.max(bmp.width, bmp.height);
+    const scale = longest > MAX ? MAX / longest : longest < 900 ? TARGET_SMALL / longest : 1;
+    const w = Math.round(bmp.width * scale);
+    const h = Math.round(bmp.height * scale);
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(bmp, 0, 0, w, h);
+    return new Promise((resolve, reject) => {
+      canvas.toBlob(
+        (blob) => {
+          if (!blob) return reject(new Error("No pude preparar la foto"));
+          const fr = new FileReader();
+          fr.onload = () => resolve({ canvas, base64: String(fr.result).split(",")[1], lowRes: longest < 900 });
+          fr.onerror = () => reject(new Error("No pude codificar la foto"));
+          fr.readAsDataURL(blob);
+        },
+        "image/jpeg",
+        0.85,
+      );
+    });
+  }
+
+  /** Dibuja la foto con todo el texto leído (gris) y los hallazgos (color y etiqueta). */
+  function drawOverlay(canvas, base, result, selected = -1, maxW = 340) {
+    const scale = Math.min(1, maxW / result.width);
+    canvas.width = Math.round(result.width * scale);
+    canvas.height = Math.round(result.height * scale);
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(base, 0, 0, canvas.width, canvas.height);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = "rgba(150,150,150,.85)";
+    for (const l of result.lines) {
+      const [x0, y0, x1, y1] = l.box.map((v) => v * scale);
+      ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+    }
+    result.findings.forEach((f, i) => {
+      const [x0, y0, x1, y1] = f.box.map((v) => v * scale);
+      ctx.lineWidth = i === selected ? 4 : 2;
+      ctx.strokeStyle = f.color || "#2563eb";
+      ctx.strokeRect(x0 - 1, y0 - 1, x1 - x0 + 2, y1 - y0 + 2);
+      ctx.font = "bold 10px system-ui, sans-serif";
+      const tw = ctx.measureText(f.label).width + 6;
+      const ty = Math.max(12, y0 - 2);
+      ctx.fillStyle = f.color || "#2563eb";
+      ctx.fillRect(x0 - 1, ty - 11, tw, 12);
+      ctx.fillStyle = "#fff";
+      ctx.fillText(f.label, x0 + 2, ty - 1);
+    });
+  }
+
+  /** Muestra la foto con cajas, la lista de hallazgos con su confianza y lo que no se encontró. */
+  function renderPhoto(container, base, result, meta) {
+    const canvas = el("canvas", { className: "vcanvas" });
+    let selected = -1;
+    const redraw = () => drawOverlay(canvas, base, result, selected);
+    redraw();
+
+    const rows = result.findings
+      .map((f, i) => ({ f, i }))
+      .sort((a, b) => Number(a.f.ignored) - Number(b.f.ignored))
+      .map(({ f, i }) => {
+        const pct = Math.round(f.score * 100);
+        const shown = Array.isArray(f.value) ? f.value.join(" · ") : f.value ?? f.text;
+        const dot = el("span", { className: "dot2" });
+        dot.style.background = f.color || "#2563eb";
+        const li = el("li", { title: "Clic para resaltar en la foto" }, [
+          dot,
+          el("span", { textContent: `${f.label}: ${shown}` }),
+          el("span", { className: f.lowConfidence ? "low" : "", textContent: `${f.lowConfidence ? "⚠ " : ""}${pct}%` }),
+        ]);
+        if (f.ignored) li.style.opacity = ".6";
+        li.addEventListener("click", () => {
+          selected = selected === i ? -1 : i;
+          redraw();
+        });
+        return li;
+      });
+
+    const notFound = result.notFound.map((k) => NOT_FOUND_LABELS[k] || k);
+    const bigBtn = el("button", { textContent: "Abrir grande" });
+    bigBtn.addEventListener("click", () => {
+      const big = document.createElement("canvas");
+      drawOverlay(big, base, result, selected, result.width);
+      big.toBlob((b) => b && window.open(URL.createObjectURL(b), "_blank"));
+    });
+
+    container.replaceChildren(
+      el("div", { className: "meta", textContent: `Foto leída (${DOC_TYPE_LABELS[result.docType] || DOC_TYPE_LABELS.unknown}): ${meta.orig[0]}×${meta.orig[1]} px · ${meta.secs} s${meta.viaLightbox ? " · ampliada desde Connecteam" : ""}${meta.lowRes ? " · ⚠ baja resolución" : ""}${result.facts && result.facts.boosted ? ` · releída ampliada ×${result.facts.boosted.join(" y ×")}${result.facts.receiptVotes ? ` (recibo en ${result.facts.receiptVotes} lectura(s))` : ""}` : ""}` }),
+      canvas,
+      el("ul", { className: "finds" }, rows),
+      notFound.length ? el("div", { className: "nf", textContent: `No encontrado: ${notFound.join(", ")}` }) : el("span"),
+      el("div", { className: "actions" }, [bigBtn]),
+    );
+  }
+
+  // Parques (127) del directorio del servidor (spec 004). Se piden una vez; si falla, el selector queda con lo detectado.
+  let parkOptions = [];
+  let parksLoaded = false;
+  async function ensureParks() {
+    if (parksLoaded) return;
+    try {
+      const r = await callBackend({ action: "list_parks" });
+      if (r.contract === EXPECTED_CONTRACT && Array.isArray(r.parks)) {
+        parkOptions = r.parks;
+        parksLoaded = true;
+      }
+    } catch (e) {
+      log("list_parks falló:", e.message);
+    }
+  }
+  const PROTOCOL_LABELS = {
+    test_card: "Protocolo: Test card · $10 = 50 flames, sin recibo",
+    receipt: "Protocolo: con recibo (Gravity → Amusement)",
+    out_of_scope: "Fuera de alcance de flames → se escala",
+  };
+
+  function addFlameCard(data, first) {
+    let analysis = first;
+    let approved = false;
+    let seq = 0;
+    let timer = null;
+    let lastReply = "";
+    const edited = {}; // solo lo que Juan corrigió viaja como override (y cuenta como confirmado)
+
+    const logEvent = (payload) =>
+      callBackend({ action: "log_event", caseId: data.caseId, ...payload }).catch((e) => log("log_event falló:", e.message));
+
+    const badge = el("div", { className: "badge case" });
+    const understood = el("div", { className: "understood" });
+    const visionEl = el("div", { className: "vision" }); // fotos leídas (spec 003)
+    const parkSel = el("select", {}, [
+      el("option", { value: "", textContent: "— elegir —" }),
+      ...parkOptions.map((o) => el("option", { value: o.key, textContent: o.code })),
+    ]);
+    const cardIn = el("input", { type: "text", inputMode: "numeric", placeholder: "10 dígitos" });
+    const receiptIn = el("input", { type: "text", inputMode: "numeric", placeholder: "Receipt Number (8 dígitos)" });
+    const flamesIn = el("input", { type: "number", min: "1", placeholder: "se leerá del recibo" });
+    const amountIn = el("input", { type: "number", min: "0", step: "0.01", placeholder: "se leerá del recibo" });
+    const f0 = first.fields || {};
+    if (f0.parkKey && !parkOptions.some((o) => o.key === f0.parkKey)) parkSel.append(el("option", { value: f0.parkKey, textContent: f0.parkCode || f0.parkKey }));
+    parkSel.value = f0.parkKey || "";
+    cardIn.value = f0.card || "";
+    receiptIn.value = f0.receiptNumber || "";
+    flamesIn.value = f0.flames ?? "";
+    amountIn.value = f0.amountUsd ?? "";
+
+    // Cada fila (etiqueta + control) se puede ocultar según el protocolo.
+    const rows = {};
+    const fieldsEl = el("div", { className: "fields" });
+    const addRow = (key, label, control) => {
+      const l = el("span", { textContent: label });
+      rows[key] = [l, control];
+      fieldsEl.append(l, control);
+    };
+    addRow("park", "Parque", parkSel);
+    addRow("card", "Tarjeta", cardIn);
+    addRow("receipt", "Recibo #", receiptIn);
+    addRow("flames", "Flames", flamesIn);
+    addRow("amount", "Monto $", amountIn);
+    addRow("who", "Pidió", el("strong", { textContent: data.author || "Desconocido" }));
+    const showRow = (key, on) => rows[key].forEach((n) => (n.style.display = on ? "" : "none"));
+
+    const blockersEl = el("ul", { className: "blockers" });
+    const pendingEl = el("ul", { className: "pending" });
+    const warnEl = el("ul", { className: "warns" });
+    const gravNote = el("div", { className: "meta" }); // estado de la consulta a Gravity
+    const gravRetry = el("button", { textContent: "Actualizar", title: "Volver a pedir la lectura a Gravity" });
+    gravRetry.style.display = "none";
+    gravRetry.addEventListener("click", () => {
+      const n = analysis.fields && analysis.fields.receiptNumber;
+      if (n) askGravity(n);
+    });
+    const evidenceEl = el("div", { className: "evidence" }); // evidencia y veredicto de Gravity
+    const readEl = el("ol", { className: "steps" });
+    const execEl = el("ol", { className: "steps" });
+    const stepsWrap = el("div", {}, [
+      el("div", { className: "sec", textContent: "Antes del botón verde (solo lectura)" }),
+      readEl,
+      el("div", { className: "sec", textContent: "Al aprobar (ejecución)" }),
+      execEl,
+    ]);
+    const replyTitle = el("div", { className: "sec" });
+    const qArea = el("textarea", {});
+    const insertBtn = el("button", { className: "primary", textContent: "Insertar" });
+    const sendBtn = el("button", { className: "danger", textContent: "Enviar", disabled: true, title: "Primero inserta el texto en el cuadro" });
+    const qWrap = el("div", {}, [replyTitle, qArea, el("div", { className: "actions" }, [insertBtn, sendBtn])]);
+
+    const goBtn = el("button", { className: "go", textContent: "Aprobar y ejecutar", disabled: true });
+    const denyBtn = el("button", { textContent: "Negar" });
+    const status = el("div", { className: "meta" });
+
+    const card = el("div", { className: "card flames" }, [
+      el("div", { className: "meta", textContent: `Pedido de flames · ${new Date().toLocaleTimeString()}` }),
+      el("div", { className: "orig", textContent: `“${data.text}”` }),
+      badge,
+      el("div", { className: "sec", textContent: "Qué entendí" }),
+      understood,
+      visionEl,
+      el("div", { className: "sec", textContent: "Información capturada" }),
+      fieldsEl,
+      blockersEl,
+      warnEl,
+      gravNote,
+      gravRetry,
+      evidenceEl,
+      pendingEl,
+      stepsWrap,
+      qWrap,
+      el("div", { className: "actions" }, [goBtn, denyBtn]),
+      status,
+    ]);
+
+    function render() {
+      const a = analysis;
+      const f = a.fields || {};
+      const oos = a.protocol === "out_of_scope";
+      const test = a.protocol === "test_card";
+
+      badge.textContent = PROTOCOL_LABELS[a.protocol] || "";
+      understood.textContent = a.understood;
+      fieldsEl.style.display = oos ? "none" : "";
+      stepsWrap.style.display = oos ? "none" : "";
+      showRow("receipt", a.protocol === "receipt");
+      showRow("flames", !oos);
+      showRow("amount", !oos);
+      flamesIn.disabled = amountIn.disabled = test; // en test card son fijos: $10 = 50 flames
+      if (test || !edited.flames) flamesIn.value = f.flames ?? "";
+      if (test || !edited.amountUsd) amountIn.value = f.amountUsd ?? "";
+
+      // Lo que sale del texto o de la foto se refleja en los campos, salvo lo que ya corrigió una persona.
+      if (!edited.parkKey) parkSel.value = f.parkKey || "";
+      if (!edited.card) cardIn.value = f.card || "";
+      if (!edited.receiptNumber) receiptIn.value = f.receiptNumber || "";
+      parkSel.title = f.parkSource ? `Fuente: ${f.parkSource}` : "";
+      receiptIn.title = f.receiptSource ? `Fuente: ${f.receiptSource}` : "";
+      parkSel.classList.toggle("bad", !f.parkKey || f.locationId == null);
+      cardIn.classList.toggle("bad", !f.card || !f.cardConfirmed);
+      receiptIn.classList.toggle("bad", a.protocol === "receipt" && (!f.receiptNumber || !f.receiptConfirmed));
+
+      blockersEl.replaceChildren(...a.blockers.map((b) => el("li", { textContent: b })));
+      renderEvidence(a);
+      warnEl.replaceChildren(...(a.warnings || []).map((w) => el("li", { textContent: `⚠ ${w}` })));
+      pendingEl.replaceChildren(...a.pendingChecks.map((b) => el("li", { textContent: `⏳ ${b}` })));
+      readEl.replaceChildren(...a.steps.read.map((s) => el("li", { textContent: s })));
+      execEl.replaceChildren(...a.steps.execute.map((s) => el("li", { textContent: s })));
+
+      qWrap.style.display = a.reply ? "" : "none";
+      replyTitle.textContent = a.replyKind === "escalation" ? "Respuesta al staff (en inglés)" : "Pregunta al staff (en inglés)";
+      if (!qArea.value || qArea.value === lastReply) qArea.value = a.reply || "";
+      lastReply = a.reply || "";
+
+      goBtn.style.display = oos ? "none" : "";
+      denyBtn.textContent = oos ? "Descartar" : "Negar";
+      goBtn.disabled = approved || !a.canApprove;
+      goBtn.title = a.canApprove ? "" : a.pendingChecks[0] || "Faltan datos o hay una guarda sin cumplir";
+      if (!approved) {
+        status.textContent = a.dataReady && a.pendingChecks.length
+          ? "Datos completos ✓. El botón verde se habilita cuando existan las lecturas de Gravity y Amusement."
+          : "";
+      }
+    }
+
+    /* ---- Lectura en Gravity (solo lectura): el panel la pide y el lector de tu pestaña de Gravity la atiende ---- */
+    const askedReceipts = new Set(); // Receipt Numbers que ya se consultaron en este pedido
+    const VERDICT_TEXT = {
+      A: "Caso A: Gravity tiene los flames y la tarjeta coincide → falló la carga en Amusement (se resuelve).",
+      B: "Caso B: el recibo o la tarjeta no coinciden → se propone pedir al staff que lo rectifique.",
+      escalate: "Fuera de lo previsto → se escala (Allow me take a look).",
+    };
+
+    function renderEvidence(a) {
+      const ev = a.evidence || [];
+      evidenceEl.replaceChildren();
+      if (!ev.length) return;
+      const list = el(
+        "ul",
+        { className: "ev-list" },
+        ev.map((c) => el("li", { className: `ev-${c.status}`, textContent: `${c.status === "ok" ? "✓" : c.status === "fail" ? "✗" : "·"} ${c.label}${c.detail ? " — " + c.detail : ""}` })),
+      );
+      const banner = VERDICT_TEXT[a.verdict] ? el("div", { className: `verdict verdict-${a.verdict}`, textContent: VERDICT_TEXT[a.verdict] }) : el("span");
+      evidenceEl.append(el("div", { className: "sec", textContent: "Evidencia leída en Gravity" }), list, banner);
+    }
+
+    async function askGravity(receiptNumber) {
+      askedReceipts.add(receiptNumber);
+      gravNote.textContent = "Pidiendo la lectura del recibo a Gravity…";
+      try {
+        const c = await callBackend({ action: "lookup_create", caseId: data.caseId, system: "gravity", kind: "transaction", params: { receiptNumber } });
+        const id = c.job.id;
+        const t0 = Date.now();
+        for (;;) {
+          if (!card.isConnected) return; // el pedido se cerró
+          const s = await callBackend({ action: "lookup_status", id });
+          if (s.status === "done") break;
+          if (s.status === "error") throw new Error(s.error || "El lector de Gravity falló");
+          if (s.status === "expired" || Date.now() - t0 > 90000) {
+            askedReceipts.delete(receiptNumber);
+            gravNote.textContent = "No pude leer Gravity: abre una pestaña de Gravity con tu sesión iniciada y pulsa Actualizar.";
+            gravRetry.style.display = "";
+            return;
+          }
+          gravNote.textContent = s.status === "taken" ? "Leyendo el recibo en Gravity…" : "Esperando al lector de Gravity (¿hay una pestaña de Gravity abierta con sesión?)…";
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+        gravNote.textContent = "";
+        gravRetry.style.display = "none";
+        await reanalyze();
+      } catch (e) {
+        askedReceipts.delete(receiptNumber);
+        gravNote.textContent = `No pude leer Gravity: ${e.message}`;
+        gravRetry.style.display = "";
+      }
+    }
+
+    // Se pide solo una vez por Receipt Number, en cuanto existe (aunque venga de la foto con baja confianza: Gravity lo confirma).
+    function maybeAskGravity(a) {
+      const n = a.fields && a.fields.receiptNumber;
+      if (a.protocol !== "receipt" || !n || (a.evidence && a.evidence.length) || askedReceipts.has(n)) return;
+      askGravity(n);
+    }
+
+    async function reanalyze() {
+      const mine = ++seq;
+      const overrides = {};
+      if (edited.parkKey && parkSel.value) overrides.parkKey = parkSel.value;
+      if (edited.card && cardIn.value.trim()) overrides.card = cardIn.value;
+      if (edited.receiptNumber && receiptIn.value.trim()) overrides.receiptNumber = receiptIn.value;
+      if (edited.flames && flamesIn.value !== "") overrides.flames = Number(flamesIn.value);
+      if (edited.amountUsd && amountIn.value !== "") overrides.amountUsd = Number(amountIn.value);
+      try {
+        const a = await callBackend({ action: "analyze_flames", caseId: data.caseId, text: data.text, author: data.author, overrides });
+        if (mine !== seq) return; // llegó una respuesta más nueva
+        analysis = a;
+        render();
+        maybeAskGravity(a);
+      } catch (e) {
+        status.textContent = `Error al re-evaluar: ${e.message}`;
+      }
+    }
+
+    const touch = (key) => () => {
+      edited[key] = true;
+      clearTimeout(timer);
+      timer = setTimeout(reanalyze, 350);
+    };
+    parkSel.addEventListener("change", touch("parkKey"));
+    cardIn.addEventListener("input", touch("card"));
+    receiptIn.addEventListener("input", touch("receiptNumber"));
+    flamesIn.addEventListener("input", touch("flames"));
+    amountIn.addEventListener("input", touch("amountUsd"));
+
+    insertBtn.addEventListener("click", () => {
+      insertReplyToOriginal(data, qArea.value, (ok) => {
+        if (!ok) insertBtn.textContent = "No encontré el cuadro";
+        else card.markQuestionInserted();
+      });
+    });
+    sendBtn.addEventListener("click", () => {
+      const ok = confirmAndSend();
+      if (ok === "sent") {
+        sendBtn.textContent = "Enviado ✓";
+        sendBtn.disabled = true;
+        logEvent({ kind: "reply", title: "Juan envió la respuesta al staff", detail: qArea.value });
+      } else if (ok !== "cancelled") {
+        sendBtn.textContent = "No se pudo enviar";
+        setTimeout(() => (sendBtn.textContent = "Enviar"), 2500);
+      }
+    });
+    card.markQuestionInserted = () => {
+      insertBtn.textContent = "Insertado ✓ (revisa y envía tú)";
+      sendBtn.disabled = false;
+      sendBtn.title = "";
+    };
+
+    // Solo un clic humano real aprueba (constitución, principio 1). La ejecución en Amusement
+    // llega en tareas posteriores; por ahora la aprobación se registra en los logs.
+    goBtn.addEventListener("click", (ev) => {
+      if (!ev.isTrusted || goBtn.disabled) return;
+      approved = true;
+      goBtn.disabled = true;
+      goBtn.textContent = "Aprobado ✓";
+      status.textContent = "Aprobación registrada en los logs. La ejecución en Amusement todavía no está conectada.";
+      logEvent({ kind: "approval", title: "Juan aprobó el protocolo", detail: analysis.understood, data: { fields: analysis.fields }, outcome: "prepared_for_human" });
+    });
+    denyBtn.addEventListener("click", () => {
+      if (analysis.protocol !== "out_of_scope") {
+        logEvent({ kind: "approval", title: "Juan negó el pedido", detail: analysis.understood, outcome: "denied" });
+      }
+      card.remove();
+    });
+
+    // Fotos: se leen en el servidor y, al volver, se re-evalúa el pedido con lo que dice el ticket.
+    async function addPhoto(url) {
+      const note = el("div", { className: "meta", textContent: "Descargando la foto…" });
+      const box = el("div", { className: "photo" }, [note]);
+      visionEl.append(box);
+      const t0 = Date.now();
+      try {
+        let best = await fetchBestImage(url);
+        let viaLightbox = false;
+        // Miniatura (< 900 px): se intenta conseguir la versión ampliada que muestra Connecteam al hacer clic.
+        if (Math.max(best.bmp.width, best.bmp.height) < 900) {
+          note.textContent = "La foto es pequeña: intentando abrirla ampliada en Connecteam…";
+          const bigSrc = await tryLightbox(url);
+          if (bigSrc && bigSrc !== url) {
+            try {
+              const big = await fetchBestImage(bigSrc);
+              if (big.bmp.width * big.bmp.height > best.bmp.width * best.bmp.height) {
+                best = big;
+                viaLightbox = true;
+              }
+            } catch (e) {
+              log("foto ampliada no descargable", e.message);
+            }
+          }
+        }
+        const up = await prepareUpload(best.bmp);
+        note.textContent = `Leyendo la foto (${best.bmp.width}×${best.bmp.height})… el OCR tarda unos segundos`;
+        const result = await callBackend({ action: "read_image", caseId: data.caseId, mime: "image/jpeg", imageBase64: up.base64 }, 90000);
+        renderPhoto(box, up.canvas, result, { orig: [best.bmp.width, best.bmp.height], lowRes: up.lowRes, viaLightbox, secs: ((Date.now() - t0) / 1000).toFixed(1) });
+        await reanalyze();
+      } catch (e) {
+        box.replaceChildren(el("div", { className: "blockers", textContent: /^No pude/.test(e.message) ? e.message : `No pude leer la foto: ${e.message}` }));
+      }
+    }
+    card.addImages = (urls) => urls.forEach((u) => addPhoto(u));
+
+    render();
+    pushCard(card);
+    maybeAskGravity(analysis);
+    return card;
+  }
+
   function addErrorCard(data, message) {
     setStatus("error");
     pushCard(
@@ -758,10 +1393,15 @@
   /* Arranque                                                          */
   /* ================================================================ */
   function start() {
+    // Si hay dos copias del userscript instaladas, la segunda no arranca (evita tarjetas duplicadas).
+    if (document.getElementById("ke-assistant-panel")) {
+      console.warn("[KE] Ya hay otra copia de KE Assistant corriendo en esta página; revisa Tampermonkey por scripts duplicados.");
+      return;
+    }
     document.body.append(panelHost);
-    if (/PEGA_AQUI/.test(CONFIG.SHARED_SECRET)) {
+    if (/PEGA_AQUI|__SHARED_SECRET__/.test(CONFIG.SHARED_SECRET)) {
       addErrorCard({ author: "Configuración", text: "Placeholder sin reemplazar" },
-        "Edita SHARED_SECRET en el userscript (Tampermonkey → Editar) para que coincida con tu backend.");
+        "Este script no trae el secreto: instálalo desde http://127.0.0.1:8787/userscript/connecteam-listener-v2.user.js con el servidor local corriendo (el servidor se lo agrega).");
       return;
     }
     setStatus("working");
