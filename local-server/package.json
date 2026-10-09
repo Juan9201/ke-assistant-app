@@ -4,7 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test *.test.js",
+    "vision:eval": "node scripts/vision-eval.js",
+    "vision:e2e": "node scripts/vision-e2e.js"
   },
   "dependencies": {
     "dotenv": "^16.4.5"
