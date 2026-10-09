@@ -17,3 +17,7 @@ IMG Training/
 
 # Exportaciones sueltas de Tampermonkey (pueden traer el secreto)
 KE Assistant*.txt
+
+# Prototipo site-mapper: su perfil de Chrome guarda cookies y sesión. NUNCA a GitHub.
+tools/site-mapper/.profile/
+tools/site-mapper/node_modules/
