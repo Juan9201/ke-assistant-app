@@ -220,8 +220,8 @@ export function extractGreetingName(author, rolePrefixes) {
   const words = String(author || "").trim().split(/\s+/).filter(Boolean);
   if (words.length === 0) return "";
   const firstToken = words[0] === "*" ? "*" : words[0].replace(/[^A-Za-z]/g, "").toUpperCase();
-  const idx = rolePrefixes.has(firstToken) && words.length > 1 ? 1 : 0;
-  return words[idx];
+  const idx = (firstToken === "*" || rolePrefixes.has(firstToken)) && words.length > 1 ? 1 : 0; // "*" es siempre prefijo (spec 007)
+  return words[idx] === "*" ? "" : words[idx];
 }
 
 /** Extrae el nivel de autonomía de un módulo. Ante cualquier duda → escalar. */

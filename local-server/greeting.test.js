@@ -27,7 +27,13 @@ test("sin rango conocido no se recorta nada (no se corrompen nombres reales)", (
   assert.equal(extractGreetingName("JJ Smith", p), "JJ");
 });
 
-test("un '*' solo, sin nombre, no se convierte en saludo", () => {
+test("un '*' solo, sin nombre, no se convierte en saludo (spec 007 R-03)", () => {
   const p = parseRolePrefixes(glossary());
-  assert.equal(extractGreetingName("*", p), "*");
+  assert.equal(extractGreetingName("*", p), "");
+});
+
+test("regresión: el '*' se omite aunque la tabla de rangos no lo tenga (spec 007 R-01/R-04)", () => {
+  assert.equal(extractGreetingName("* Crystal Mercado", new Set()), "Crystal");
+  assert.equal(extractGreetingName("* Crystal Mercado", new Set(["AM"])), "Crystal");
+  assert.equal(extractGreetingName("AM Rashel Carswell", new Set()), "AM"); // las letras sí dependen de la tabla (R-02)
 });
