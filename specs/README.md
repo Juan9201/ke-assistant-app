@@ -27,6 +27,9 @@ specs/
 ```
 Numeración: 3 dígitos, secuencial. Una carpeta por capacidad entregable.
 
+## Líneas de caso
+Cada tema de soporte (Play Card, Refunds, Bookings, Punch Cards, Memberships, Online tickets, Split payment) es una línea de caso, registrada en `specs/constitution.md` (sección "Líneas de caso"). Para armar una: completa las preguntas abiertas de su `spec.md`, luego `/sdd-clarify` → `/sdd-plan` → `/sdd-tasks`, con su política en `kb/docs/business-logic/`. `local-server/cases.test.js` verifica que el registro, las specs y la KB sean coherentes.
+
 ## Convenciones
 - Requisitos: `R-01…` · Criterios de aceptación: `CA-01…` · Tareas: `T-01…` · Riesgos: `K-01…`
 - Marca `[NECESITA ACLARACIÓN: pregunta]` donde falte información; prohibido adivinar.
