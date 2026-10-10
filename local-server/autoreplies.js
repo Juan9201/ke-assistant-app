@@ -40,7 +40,8 @@ export const REFUND_TEXTS = {
 };
 
 const base = (requester) => ({
-  isFlameRequest: true, // el flujo de tickets es el mismo; el protocolo distingue (spec 008)
+  caseType: "refund", // caso aparte de flames (spec 008)
+  isFlameRequest: false,
   protocol: "refund",
   requester,
   fields: {},

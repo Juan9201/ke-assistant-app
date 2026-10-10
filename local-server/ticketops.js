@@ -5,7 +5,7 @@
 
 import { analyzeFlameRequest } from "./flamerequest.js";
 import { loadParks, matchPark } from "./parks.js";
-import { isRefundRequest, readYesNo, refundAnalysis } from "./autoreplies.js";
+import { createRefundCase } from "./refundcase.js";
 
 const LOOKUP_RETRY_MS = 60_000;
 
@@ -17,6 +17,7 @@ export function createTicketOps({ tickets, commands, lookups, log, visionFor = (
       console.error("No se pudo escribir el log:", e.message); // un fallo de log nunca debe tumbar la operación
     }
   };
+  const refundCase = createRefundCase({ tickets, log, greetingNameFor, isFlames: (text, author) => analyze({ text, author }).isFlameRequest });
   const lookupAsked = new Map(); // ticketId -> { receipt, ts }
 
   const run = (ticket, text, overrides = {}) =>
@@ -52,25 +53,6 @@ export function createTicketOps({ tickets, commands, lookups, log, visionFor = (
     if (r.ok && !r.reused) safeLog(() => log.onLookupRequested(ticket.caseId, r.job));
   }
 
-  /** Un turno del flujo de reembolso: guarda el mensaje, el análisis, el estado y el log. */
-  function refundTurn({ ticket, incoming, stage, caseId, author, channel, continued }) {
-    const who = ticket ? ticket.author : author;
-    const analysis = refundAnalysis({ stage, author: who, greetingName: greetingNameFor(who) });
-    let created = false;
-    if (ticket) tickets.appendMessage(ticket.id, incoming, caseId);
-    else if (caseId) {
-      ticket = tickets.create({ ...incoming, caseId, author, channel });
-      created = true;
-    }
-    if (ticket) {
-      const before = ticket.analysis ? sig(ticket.analysis) : null;
-      tickets.setAnalysis(ticket.id, analysis);
-      if (created || before !== sig(analysis)) safeLog(() => log.onAnalysis({ caseId: ticket.caseId, text: incoming.text, author: ticket.author }, analysis));
-      ticket = tickets.get(ticket.id);
-    }
-    return { analysis, ticket, created, continued };
-  }
-
   return {
     /**
      * Mensaje nuevo (o re-evaluación) desde el listener. Devuelve el análisis y su ticket.
@@ -80,27 +62,10 @@ export function createTicketOps({ tickets, commands, lookups, log, visionFor = (
       const incoming = { messageKey: messageKey || caseId, messageId, text, images, ts: now() };
       let found = caseId || author ? tickets.resolve({ caseId, author }) : null;
 
-      // Pedido de reembolso y su respuesta sí/no (spec 008): reglas propias, antes del análisis de flames.
-      const asksRefund = isRefundRequest(text);
-      const priorRefund = found?.ticket?.analysis?.protocol === "refund";
-      if (found && priorRefund && !asksRefund) {
-        const ans = readYesNo(text);
-        const isOtherTopic = ans !== "not_answer" && analyze({ text, author }).isFlameRequest; // p. ej. un pedido de flames corto
-        if (ans !== "not_answer" && !isOtherTopic) {
-          const stage = { yes: "submitted", no: "declined", unclear: "unclear" }[ans];
-          return refundTurn({ ticket: found.ticket, incoming, stage, caseId, author, channel, continued: found.continued });
-        }
-        if (found.continued) found = null; // otro tema: no se mezcla con el ticket de reembolso
-        else return { analysis: found.ticket.analysis, ticket: found.ticket, created: false, continued: false };
-      } else if (found && found.continued && asksRefund) {
-        found = null; // un pedido de reembolso nuevo no se suma a otro ticket abierto
-      }
-      if (found && priorRefund && !found.continued && found.ticket.analysis.refundStage !== "asked") {
-        return { analysis: found.ticket.analysis, ticket: found.ticket, created: false, continued: false }; // re-lectura del primer mensaje: no se retrocede de etapa
-      }
-      if (asksRefund && (!found || priorRefund)) {
-        return refundTurn({ ticket: found ? found.ticket : null, incoming, stage: "asked", caseId, author, channel, continued: !!found?.continued });
-      }
+      // Preguntas de reembolso: caso aparte (spec 008). Si el mensaje no es suyo, el flujo de flames sigue igual.
+      const rc = refundCase.handle({ found, incoming, caseId, author, text, channel });
+      if (rc.handled) return rc.result;
+      found = rc.found;
       if (found && found.continued && !looksLikeAnswer(text, images)) found = null;
       let ticket = found ? found.ticket : null;
 

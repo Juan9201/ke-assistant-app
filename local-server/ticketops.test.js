@@ -274,3 +274,12 @@ test("un pedido de flames del mismo staff, o una pregunta, no se mezcla con el t
   const q = ops.analyzeMessage(msg({ caseId: "q1", messageKey: "kq1", text: "what form do I use?" }));
   assert.notEqual(q.analysis.protocol, "refund");
 });
+
+test("el reembolso es un caso aparte: no es un pedido de flames y no pasa por su análisis", () => {
+  let flamesCalls = 0;
+  const { ops } = setup({ analyze: (...a) => { flamesCalls++; return { isFlameRequest: false }; } });
+  const r = ops.analyzeMessage(refundMsg());
+  assert.equal(r.analysis.caseType, "refund");
+  assert.equal(r.analysis.isFlameRequest, false);
+  assert.equal(flamesCalls, 0);
+});

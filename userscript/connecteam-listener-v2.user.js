@@ -412,6 +412,16 @@
             `El servidor local y el userscript (v${SCRIPT_VERSION}) no son de la misma versión: reinicia el servidor y actualiza el userscript en Tampermonkey.`,
           );
         }
+        if (analysis.caseType === "refund") {
+          // Caso aparte (spec 008): preguntas de reembolso. No usa la tarjeta ni la lógica de flames.
+          const r = analysis.reply;
+          const refundCard = addCard(data, { supported: true, needsReview: !r, reply: r || "", caseCategory: "preguntas de reembolso", caseIsNew: analysis.refundStage === "asked", module: "Reembolso", reason: analysis.understood });
+          if (CONFIG.AUTO_INSERT_WHEN_EMPTY && r) {
+            const composer = findComposer();
+            if (composer && composerIsEmpty(composer)) insertReplyToOriginal(data, r, (ok) => ok && refundCard.markInserted());
+          }
+          continue;
+        }
         if (analysis.isFlameRequest) {
           await ensureParks();
           const flameCard = addFlameCard(data, analysis);
@@ -1077,7 +1087,6 @@
     test_card: "Protocolo: Test card · $10 = 50 flames, sin recibo",
     receipt: "Protocolo: con recibo (Gravity → Amusement)",
     out_of_scope: "Fuera de alcance de flames → se escala",
-    refund: "Reembolso: se pregunta si ya envió la solicitud (nunca se ejecuta desde aquí)",
   };
 
   function addFlameCard(data, first) {
@@ -1179,7 +1188,7 @@
     function render() {
       const a = analysis;
       const f = a.fields || {};
-      const oos = a.protocol === "out_of_scope" || a.protocol === "refund";
+      const oos = a.protocol === "out_of_scope";
       const test = a.protocol === "test_card";
 
       badge.textContent = PROTOCOL_LABELS[a.protocol] || "";
@@ -1211,7 +1220,7 @@
       execEl.replaceChildren(...a.steps.execute.map((s) => el("li", { textContent: s })));
 
       qWrap.style.display = a.reply ? "" : "none";
-      replyTitle.textContent = a.replyKind === "escalation" || a.replyKind === "answer" ? "Respuesta al staff (en inglés)" : "Pregunta al staff (en inglés)";
+      replyTitle.textContent = a.replyKind === "escalation" ? "Respuesta al staff (en inglés)" : "Pregunta al staff (en inglés)";
       if (!qArea.value || qArea.value === lastReply) qArea.value = a.reply || "";
       lastReply = a.reply || "";
 
@@ -1349,7 +1358,7 @@
       logEvent({ kind: "approval", title: "Juan aprobó el protocolo", detail: analysis.understood, data: { fields: analysis.fields }, outcome: "prepared_for_human" });
     });
     denyBtn.addEventListener("click", () => {
-      if (analysis.protocol !== "out_of_scope" && analysis.protocol !== "refund") {
+      if (analysis.protocol !== "out_of_scope") {
         logEvent({ kind: "approval", title: "Juan negó el pedido", detail: analysis.understood, outcome: "denied" });
       }
       card.remove();

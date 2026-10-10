@@ -5,6 +5,7 @@
 ## Contexto para una IA
 - Primer caso de "más respuestas automáticas" por mensaje (después de flames). Cada una es una regla determinista (sin IA) que propone una respuesta; **una persona la revisa y envía** (principio 1).
 - Leer antes: `specs/constitution.md` (R2: reembolsos siempre escalan), spec 006 (tickets).
+- **Es un caso aparte de flames** ("preguntas de reembolso", `caseType: "refund"`, `isFlameRequest: false`): vive en `refundcase.js` y `autoreplies.js`, el listener lo muestra con su propia tarjeta, y NO modifica la lógica de flames (ticketops solo tiene un enganche que, si el mensaje no es de reembolso, deja el flujo de flames idéntico; lo prueba la suite de flames sin cambios).
 - Convive con la regla vieja de flames ("reembolso + tarjeta/flames → escalar"): la nueva regla manda cuando el mensaje es un **pedido de reembolso** (R-01); lo demás sobre reembolsos sigue escalando.
 
 ## Reglas dictadas por Juan
