@@ -228,3 +228,49 @@ test("si el listener no pudo citar el mensaje, la inserción vale pero queda el 
   assert.equal(th.at(-1).kind, "inserted");
   assert.match(th.find((x) => x.kind === "info").text, /sin citarlo/);
 });
+
+// ---- spec 008: pedido de reembolso y su respuesta sí/no
+const refundMsg = (over = {}) => msg({ caseId: "r1", messageKey: "kr1", messageId: "mr1", text: "we need a refund processed", ...over });
+
+test("un pedido de reembolso crea un ticket que pregunta si ya envió la solicitud, con el nombre", () => {
+  const { ops, tickets } = setup();
+  const r = ops.analyzeMessage(refundMsg());
+  assert.equal(r.analysis.protocol, "refund");
+  assert.equal(r.analysis.reply, "Rashel, did you submitted the refund request, correct?");
+  assert.equal(r.ticket.status, "waiting_staff");
+  assert.equal(tickets.list().length, 1);
+});
+
+test("'Yes did' → agradece y escala a Juan; el mismo mensaje re-leído no retrocede", () => {
+  const { ops } = setup();
+  ops.analyzeMessage(refundMsg());
+  const r = ops.analyzeMessage(msg({ caseId: "r2", messageKey: "kr2", messageId: "mr2", text: "Yes did" }));
+  assert.equal(r.analysis.reply, "Thank you so much! We will review it.");
+  assert.equal(r.ticket.status, "escalated");
+  assert.equal(r.ticket.messages.length, 2);
+  const again = ops.analyzeMessage(refundMsg({ caseId: "r2", messageKey: "kr2", text: "Yes did" }));
+  assert.equal(again.analysis.refundStage, "submitted");
+});
+
+test("'No' → se le dice que puede hacerlo y el ticket queda resuelto; algo poco claro escala sin respuesta", () => {
+  const a = setup();
+  a.ops.analyzeMessage(refundMsg());
+  const no = a.ops.analyzeMessage(msg({ caseId: "r2", messageKey: "kr2", text: "No" }));
+  assert.equal(no.analysis.reply, "Understood, feel free to do so!! Thank you.");
+  assert.equal(no.ticket.status, "resolved");
+  const b = setup();
+  b.ops.analyzeMessage(refundMsg());
+  const u = b.ops.analyzeMessage(msg({ caseId: "r2", messageKey: "kr2", text: "maybe" }));
+  assert.equal(u.analysis.reply, null);
+  assert.equal(u.ticket.status, "escalated");
+});
+
+test("un pedido de flames del mismo staff, o una pregunta, no se mezcla con el ticket de reembolso", () => {
+  const { ops, tickets } = setup();
+  ops.analyzeMessage(refundMsg());
+  const f = ops.analyzeMessage(msg({ caseId: "f1", messageKey: "kf1", text: "Playcard not loading flames, card 3968122745" }));
+  assert.notEqual(f.analysis.protocol, "refund");
+  assert.equal(tickets.list().filter((t) => t.protocol === "refund").length, 1);
+  const q = ops.analyzeMessage(msg({ caseId: "q1", messageKey: "kq1", text: "what form do I use?" }));
+  assert.notEqual(q.analysis.protocol, "refund");
+});

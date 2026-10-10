@@ -44,6 +44,13 @@ export function createFlowLogger({ dir } = {}) {
       } else if (edited) {
         log.add("extract", "Juan corrigió campos en el panel", a.understood, { fields: a.fields });
       }
+      if (a.protocol === "refund") {
+        if (a.reply) log.add("reply", "Respuesta propuesta al staff (en inglés)", a.reply, { replyKind: a.replyKind });
+        if (a.refundStage === "submitted") close(caseId, "escalated", "Dijo que ya envió la solicitud de reembolso: la revisa Juan");
+        else if (a.refundStage === "declined") close(caseId, "answered", "Dijo que no ha enviado la solicitud de reembolso");
+        else if (a.refundStage === "unclear") close(caseId, "escalated", a.understood);
+        return;
+      }
       if (a.protocol === "out_of_scope") {
         log.add("escalation", "Fuera de alcance de flames", a.understood, { reply: a.reply });
         close(caseId, "escalated", a.understood);

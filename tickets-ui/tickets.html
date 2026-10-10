@@ -140,7 +140,7 @@ const STATUS = {
   new: "Nuevo", waiting_staff: "Esperando al staff", needs_rectification: "Rectificar (caso B)", ready_for_approval: "Listo para aprobar",
   escalated: "Escalado", denied: "Negado", approved: "Aprobado", resolved: "Resuelto",
 };
-const PROTOCOL = { test_card: "Test card · $10 = 50 flames", receipt: "Con recibo (Gravity → Amusement)", out_of_scope: "Fuera de alcance → se escala" };
+const PROTOCOL = { test_card: "Test card · $10 = 50 flames", receipt: "Con recibo (Gravity → Amusement)", out_of_scope: "Fuera de alcance → se escala", refund: "Reembolso · se pregunta si ya envió la solicitud" };
 const SRC_LABEL = { texto: "del texto", foto: "de la foto", gravity: "de Gravity", lista: "de la lista de la KB", corregido: "corregido por una persona", "foto+gravity": "foto confirmada por Gravity" };
 const VERDICT = {
   A: "Caso A: Gravity tiene los flames y la tarjeta coincide → falló la carga en Amusement (se resuelve).",
@@ -243,7 +243,7 @@ function threadMsg(x) {
 /* ---------------- lo que entendió + datos editables ---------------- */
 function understoodCard(t, a) {
   const f = a.fields || {};
-  const oos = a.protocol === "out_of_scope", test = a.protocol === "test_card";
+  const oos = a.protocol === "out_of_scope" || a.protocol === "refund", test = a.protocol === "test_card";
   const edits = {};
   let timer = null;
   const send = () => {
@@ -308,7 +308,7 @@ function replyCard(t, a) {
   };
   const canSend = t.lastInserted && t.lastInserted === ta.value.trim();
   return h("div", { class: "card" }, h("h3", { text: "Respuesta al staff" }),
-    a && a.replyKind && h("div", { class: "small muted", style: "margin-bottom:6px", text: { question: "El asistente propone preguntar lo que falta:", mismatch: "El asistente propone pedir que rectifiquen:", escalation: "El asistente propone escalar:" }[a.replyKind] || "" }),
+    a && a.replyKind && h("div", { class: "small muted", style: "margin-bottom:6px", text: { question: "El asistente propone preguntar lo que falta:", mismatch: "El asistente propone pedir que rectifiquen:", escalation: "El asistente propone escalar:", answer: "El asistente propone responder:" }[a.replyKind] || "" }),
     ta,
     h("div", { class: "row" },
       h("button", { class: "primary", disabled: busy, title: "Pega la respuesta en el cuadro de Connecteam como respuesta citando su mensaje. NO la envía.", onclick: () => run("insert"), text: `Insertar en Connecteam (citando a ${(t.author || "").split(" ").slice(-1)[0] || "staff"})` }),

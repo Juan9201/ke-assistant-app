@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         KE Assistant — Connecteam listener v2
 // @namespace    https://github.com/Juan9201/ke-assistant
-// @version      2.6.0
+// @version      2.7.0
 // @description  Detecta mensajes nuevos en Gravity Support y sugiere una respuesta. Solo envía si tú haces clic en "Enviar".
 // @match        https://app.connecteam.com/*
 // @grant        GM_xmlhttpRequest
@@ -103,7 +103,7 @@
 
   // Versión del "contrato" con el servidor local (forma de la respuesta de analyze_flames).
   // Si no coincide con la del servidor, el panel avisa en vez de fallar con un error críptico.
-  const SCRIPT_VERSION = "2.6.0";
+  const SCRIPT_VERSION = "2.7.0";
   const EXPECTED_CONTRACT = 2;
 
   const QUIET_MS = 2500; // tiempo sin cambios para considerar que el historial terminó de cargar
@@ -1077,6 +1077,7 @@
     test_card: "Protocolo: Test card · $10 = 50 flames, sin recibo",
     receipt: "Protocolo: con recibo (Gravity → Amusement)",
     out_of_scope: "Fuera de alcance de flames → se escala",
+    refund: "Reembolso: se pregunta si ya envió la solicitud (nunca se ejecuta desde aquí)",
   };
 
   function addFlameCard(data, first) {
@@ -1178,7 +1179,7 @@
     function render() {
       const a = analysis;
       const f = a.fields || {};
-      const oos = a.protocol === "out_of_scope";
+      const oos = a.protocol === "out_of_scope" || a.protocol === "refund";
       const test = a.protocol === "test_card";
 
       badge.textContent = PROTOCOL_LABELS[a.protocol] || "";
@@ -1210,7 +1211,7 @@
       execEl.replaceChildren(...a.steps.execute.map((s) => el("li", { textContent: s })));
 
       qWrap.style.display = a.reply ? "" : "none";
-      replyTitle.textContent = a.replyKind === "escalation" ? "Respuesta al staff (en inglés)" : "Pregunta al staff (en inglés)";
+      replyTitle.textContent = a.replyKind === "escalation" || a.replyKind === "answer" ? "Respuesta al staff (en inglés)" : "Pregunta al staff (en inglés)";
       if (!qArea.value || qArea.value === lastReply) qArea.value = a.reply || "";
       lastReply = a.reply || "";
 
@@ -1348,7 +1349,7 @@
       logEvent({ kind: "approval", title: "Juan aprobó el protocolo", detail: analysis.understood, data: { fields: analysis.fields }, outcome: "prepared_for_human" });
     });
     denyBtn.addEventListener("click", () => {
-      if (analysis.protocol !== "out_of_scope") {
+      if (analysis.protocol !== "out_of_scope" && analysis.protocol !== "refund") {
         logEvent({ kind: "approval", title: "Juan negó el pedido", detail: analysis.understood, outcome: "denied" });
       }
       card.remove();
