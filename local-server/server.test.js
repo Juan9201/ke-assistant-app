@@ -215,6 +215,8 @@ test("el listener se entrega con el secreto inyectado por el servidor (el archiv
   assert.equal(r.status, 200);
   assert.ok(!r.body.includes("__SHARED_SECRET__"), "el marcador se reemplazó");
   assert.ok(r.body.includes(`SHARED_SECRET: "${SECRET}"`));
+  // El secreto solo debe aparecer en el comentario y en CONFIG: si el servidor también lo pusiera dentro de la comprobación de "placeholder sin reemplazar", esa comprobación fallaría siempre (bug real, v2.7.0).
+  assert.equal(r.body.split(SECRET).length - 1, 2, "el secreto aparece solo donde debe");
   const enRepo = fs.readFileSync(path.join(HERE, "..", "userscript", "connecteam-listener-v2.user.js"), "utf8");
   assert.ok(enRepo.includes('SHARED_SECRET: "__SHARED_SECRET__"'), "el archivo del repo lleva el marcador");
 });

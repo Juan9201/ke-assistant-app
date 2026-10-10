@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         KE Assistant — Connecteam listener v2
 // @namespace    https://github.com/Juan9201/ke-assistant
-// @version      2.7.0
+// @version      2.7.1
 // @description  Detecta mensajes nuevos en Gravity Support y sugiere una respuesta. Solo envía si tú haces clic en "Enviar".
 // @match        https://app.connecteam.com/*
 // @grant        GM_xmlhttpRequest
@@ -103,7 +103,7 @@
 
   // Versión del "contrato" con el servidor local (forma de la respuesta de analyze_flames).
   // Si no coincide con la del servidor, el panel avisa en vez de fallar con un error críptico.
-  const SCRIPT_VERSION = "2.7.0";
+  const SCRIPT_VERSION = "2.7.1";
   const EXPECTED_CONTRACT = 2;
 
   const QUIET_MS = 2500; // tiempo sin cambios para considerar que el historial terminó de cargar
@@ -1492,7 +1492,7 @@
       return;
     }
     document.body.append(panelHost);
-    if (/PEGA_AQUI|__SHARED_SECRET__/.test(CONFIG.SHARED_SECRET)) {
+    if (/PEGA_AQUI|__SHARED_SECRET_/.test(CONFIG.SHARED_SECRET)) {
       addErrorCard({ author: "Configuración", text: "Placeholder sin reemplazar" },
         "Este script no trae el secreto: instálalo desde http://127.0.0.1:8787/userscript/connecteam-listener-v2.user.js con el servidor local corriendo (el servidor se lo agrega).");
       return;
