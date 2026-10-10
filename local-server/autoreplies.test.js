@@ -18,7 +18,7 @@ test("sí / no / ambiguo / otro tema", () => {
 });
 
 test("textos literales, en una sola línea, y la pregunta lleva el nombre", () => {
-  assert.equal(refundAnalysis({ stage: "asked", author: "AM Rashel Carswell", greetingName: "Rashel" }).reply, "Rashel, did you submitted the refund request, correct?");
+  assert.equal(refundAnalysis({ stage: "asked", author: "AM Rashel Carswell", greetingName: "Rashel" }).reply, "Rashel, did you submit the refund request, correct?");
   assert.equal(refundAnalysis({ stage: "submitted" }).reply, "Thank you so much! We will review it.");
   assert.equal(refundAnalysis({ stage: "declined" }).reply, "Understood, feel free to do so!! Thank you.");
   assert.equal(refundAnalysis({ stage: "unclear" }).reply, null);

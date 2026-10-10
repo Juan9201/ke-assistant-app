@@ -236,7 +236,7 @@ test("un pedido de reembolso crea un ticket que pregunta si ya envió la solicit
   const { ops, tickets } = setup();
   const r = ops.analyzeMessage(refundMsg());
   assert.equal(r.analysis.protocol, "refund");
-  assert.equal(r.analysis.reply, "Rashel, did you submitted the refund request, correct?");
+  assert.equal(r.analysis.reply, "Rashel, did you submit the refund request, correct?");
   assert.equal(r.ticket.status, "waiting_staff");
   assert.equal(tickets.list().length, 1);
 });

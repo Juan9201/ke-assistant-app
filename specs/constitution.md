@@ -22,7 +22,7 @@
 | R1 | Escritura reversible | Requiere aprobación humana (hasta ganar autonomía por evals) |
 | R2 | Irreversible, dinero, seguridad, datos personales | Siempre escala |
 
-Excepción acordada (ADR-001, enmendada por ADR-002): la **recarga manual de flames** es R1 con guardas obligatorias y aprobación humana del protocolo completo mediante el botón verde del panel; el clic en `Credit` lo ejecuta el protocolo, no una segunda aprobación. Reembolsos y anulaciones siguen siendo R2. La excepción aplica solo a ese flujo: el principio 4 ("siempre escalan") rige para todo lo demás.
+Excepción acordada (ADR-001, enmendada por ADR-002): la **recarga manual de flames** es R1 con guardas obligatorias y aprobación humana del protocolo completo mediante el botón verde del panel; el clic en `Credit` lo ejecuta el protocolo, no una segunda aprobación. Reembolsos y anulaciones siguen siendo R2. Aclaración (Juan, 2026-10-10): una respuesta que solo **pregunta o indica qué hacer** sobre un reembolso (p. ej. "¿ya enviaste la solicitud?", spec 008) no ejecuta ni promete nada y no viola R2; R2 aplica cuando se **ejecutan transacciones**. La excepción de la recarga aplica solo a ese flujo: el principio 4 ("siempre escalan") rige para todo lo demás.
 
 ## Interlocutores
 Las respuestas son siempre para el **staff** del parque; el asistente nunca se dirige al huésped.
@@ -39,4 +39,5 @@ Requisitos cumplidos y trazables · evals en verde · sin secretos · spec/plan/
 |---|---|---|
 | 2026-10-02 | ADR-001 | Recarga manual de flames pasa de R2 a R1 con guardas y aprobación humana |
 | 2026-10-05 | ADR-002 | Aprobación humana pasa del clic final en `Credit` al botón verde que aprueba el protocolo completo; guardas por código se mantienen |
+| 2026-10-10 | — | Aclaración de R2: preguntar o indicar qué hacer sobre un reembolso no es ejecutarlo (spec 008) |
 | 2026-10-05 | — | Principio 1 reformulado a "human in the loop"; principio 2 permite preguntar datos faltantes; principio 7 permite visión solo con imagen; se agrega la cláusula de fase de validación |

@@ -19,7 +19,7 @@ const YES = /\b(yes|yeah|yep|yup|yea|sure|correct|done|did|submitted|affirmative
 const NO = /\b(no|nope|not|never|havent|didnt|dont|wont)\b/;
 
 /**
- * Lee la respuesta del staff a "did you submitted the refund request?".
+ * Lee la respuesta del staff a "did you submit the refund request?".
  * Devuelve "yes" | "no" | "unclear" (corta pero ambigua) | "not_answer" (larga o con pregunta: es otro tema).
  */
 export function readYesNo(text) {
@@ -34,7 +34,7 @@ export function readYesNo(text) {
 }
 
 export const REFUND_TEXTS = {
-  ask: (name) => (name ? `${name}, did you submitted the refund request, correct?` : "Did you submitted the refund request, correct?"),
+  ask: (name) => (name ? `${name}, did you submit the refund request, correct?` : "Did you submitted the refund request, correct?"),
   yes: "Thank you so much! We will review it.",
   no: "Understood, feel free to do so!! Thank you.",
 };
