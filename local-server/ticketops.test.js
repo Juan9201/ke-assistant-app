@@ -283,3 +283,28 @@ test("el reembolso es un caso aparte: no es un pedido de flames y no pasa por su
   assert.equal(r.analysis.isFlameRequest, false);
   assert.equal(flamesCalls, 0);
 });
+
+test("avisa que ya envió la solicitud: agradece con el nombre y escala, aunque no haya pregunta previa", () => {
+  const { ops } = setup();
+  const r = ops.analyzeMessage(msg({ caseId: "s1", messageKey: "ks1", text: "We just submitted a refund request" }));
+  assert.equal(r.analysis.protocol, "refund");
+  assert.equal(r.analysis.reply, "Rashel, thank you so much! We will review your case");
+  assert.equal(r.ticket.status, "escalated");
+});
+
+test("pregunta por el estado: explica la cola; 'any word with this update' vale si hubo un reembolso reciente", () => {
+  const { ops, tickets } = setup();
+  const solo = ops.analyzeMessage(msg({ caseId: "u0", messageKey: "ku0", text: "any word with this update" }));
+  assert.notEqual(solo.analysis.protocol, "refund"); // sin contexto no es de reembolso
+  ops.analyzeMessage(refundMsg());
+  ops.analyzeMessage(msg({ caseId: "r2", messageKey: "kr2", text: "Yes did" })); // el ticket pasa a escalado
+  const q = ops.analyzeMessage(msg({ caseId: "u1", messageKey: "ku1", text: "any word with this update" }));
+  assert.ok(q.analysis.reply.startsWith("To be transparent"));
+  assert.equal(tickets.list().filter((t) => t.protocol === "refund").length, 1, "se suma al mismo ticket de reembolso");
+});
+
+test("'I am requesting a refund' sigue siendo un pedido (pregunta), no un aviso de envío", () => {
+  const { ops } = setup();
+  const r = ops.analyzeMessage(msg({ caseId: "q9", messageKey: "kq9", text: "I am requesting a refund" }));
+  assert.equal(r.analysis.reply, "Rashel, did you submit the refund request, correct?");
+});

@@ -24,3 +24,22 @@ test("textos literales, en una sola línea, y la pregunta lleva el nombre", () =
   assert.equal(refundAnalysis({ stage: "unclear" }).reply, null);
   for (const r of Object.values(REFUND_TEXTS)) assert.ok(!String(typeof r === "function" ? r("X") : r).includes("\n"));
 });
+
+test("avisos de que ya se envió la solicitud (spec 008, regla 4)", async () => {
+  const { isRefundSubmittedStatement } = await import("./autoreplies.js");
+  for (const t of ["We just submitted a refund request", "I just submitted a refund", "I submitted a refund", "Refund has been submitted", "refund has already been submitted"]) assert.ok(isRefundSubmittedStatement(t), t);
+  for (const t of ["I am requesting a refund", "we have not submitted the refund", "needs a refund", "the card did not load"]) assert.equal(isRefundSubmittedStatement(t), false, t);
+});
+
+test("preguntas por el estado del reembolso (regla 5); sin la palabra refund solo con contexto", async () => {
+  const { isRefundStatusQuestion } = await import("./autoreplies.js");
+  for (const t of ["Any update with this refund", "Guest is waiting for refund", "How long does the refund take?"]) assert.ok(isRefundStatusQuestion(t), t);
+  for (const t of ["How long takes", "any word with this update"]) { assert.equal(isRefundStatusQuestion(t), false, t); assert.ok(isRefundStatusQuestion(t, true), t); }
+  assert.equal(isRefundStatusQuestion("the card did not load", true), false);
+});
+
+test("textos literales de las reglas 4 y 5", () => {
+  assert.equal(refundAnalysis({ stage: "stated", greetingName: "Rashel" }).reply, "Rashel, thank you so much! We will review your case");
+  assert.ok(refundAnalysis({ stage: "status" }).reply.startsWith("To be transparent, we handle a high volume of refund requests"));
+  assert.ok(refundAnalysis({ stage: "status" }).reply.endsWith("as soon as it’s completed"));
+});

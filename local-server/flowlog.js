@@ -46,7 +46,7 @@ export function createFlowLogger({ dir } = {}) {
       }
       if (a.protocol === "refund") {
         if (a.reply) log.add("reply", "Respuesta propuesta al staff (en inglés)", a.reply, { replyKind: a.replyKind });
-        if (a.refundStage === "submitted") close(caseId, "escalated", "Dijo que ya envió la solicitud de reembolso: la revisa Juan");
+        if (a.refundStage === "submitted" || a.refundStage === "stated" || a.refundStage === "status") close(caseId, "escalated", a.understood);
         else if (a.refundStage === "declined") close(caseId, "answered", "Dijo que no ha enviado la solicitud de reembolso");
         else if (a.refundStage === "unclear") close(caseId, "escalated", a.understood);
         return;

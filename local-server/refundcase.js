@@ -3,11 +3,22 @@
  * si el mensaje no es de este caso, devuelve `handled: false` y el flujo de flames sigue exactamente igual.
  */
 
-import { isRefundRequest, readYesNo, refundAnalysis } from "./autoreplies.js";
+import { isRefundRequest, isRefundSubmittedStatement, isRefundStatusQuestion, readYesNo, refundAnalysis } from "./autoreplies.js";
+
+const RECENT_MS = 2 * 60 * 60 * 1000; // un reembolso de hace menos de 2 h da contexto a "any word with this update"
+const nameKey = (a) => String(a || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
 
 const sig = (a) => JSON.stringify([a.protocol, a.refundStage, a.reply]);
 
-export function createRefundCase({ tickets, log, greetingNameFor = () => "", isFlames = () => false }) {
+export function createRefundCase({ tickets, log, greetingNameFor = () => "", isFlames = () => false, now = () => Date.now() }) {
+  /** Último ticket de reembolso reciente del mismo staff (cualquier estado). */
+  const recentRefund = (author) => {
+    const key = nameKey(author);
+    if (!key) return null;
+    const s = [...tickets.list()].filter((x) => x.protocol === "refund" && nameKey(x.author) === key && now() - x.updatedAt < RECENT_MS).sort((a, b) => b.updatedAt - a.updatedAt)[0];
+    return s ? tickets.get(s.id) : null;
+  };
+
   const safeLog = (fn) => {
     try {
       fn();
@@ -43,8 +54,19 @@ export function createRefundCase({ tickets, log, greetingNameFor = () => "", isF
      *   `found` es el ticket candidato, ya sin el ticket de reembolso cuando el mensaje es de otro tema.
      */
     handle({ found, incoming, caseId, author, text, channel }) {
-      const asks = isRefundRequest(text);
       const prior = found?.ticket?.analysis?.protocol === "refund";
+
+      // Avisos y preguntas sobre un reembolso que ya se pidió (spec 008, reglas 4 y 5).
+      const context = prior ? found.ticket : recentRefund(author);
+      const stated = isRefundSubmittedStatement(text);
+      const status = !stated && isRefundStatusQuestion(text, !!context) && !(!/\brefunds?\b/i.test(text) && isFlames(text, author));
+      if (stated || status) {
+        const sameCase = found && found.ticket.analysis?.protocol === "refund" && !found.continued;
+        if (sameCase && found.ticket.analysis.refundStage === (stated ? "stated" : "status")) return { handled: true, result: same(found.ticket) };
+        return { handled: true, result: turn({ ticket: context, incoming, stage: stated ? "stated" : "status", caseId, author, channel, continued: !!found?.continued }) };
+      }
+
+      const asks = isRefundRequest(text);
       if (!asks && !prior) return { handled: false, found };
 
       if (found && prior && !asks) {

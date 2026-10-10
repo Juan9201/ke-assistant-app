@@ -15,6 +15,28 @@ export function isRefundRequest(text) {
   return ASKS.test(t) || ASKS_AFTER.test(t);
 }
 
+// Ya envió la solicitud ("we just submitted a refund request", "refund has been submitted"…). "I am requesting a refund" NO entra: sigue siendo un pedido.
+const NOT_SUBMITTED = /\b(not|never|havent|hasnt|didnt|cant|wont)\b/;
+const SUBMITTED = [
+  /\b(we|i)\b[^.?!\n]{0,15}\bsubmitted\b[^.?!\n]{0,20}\brefunds?\b/,
+  /\brefunds?\b[^.?!\n]{0,25}\b(has|have)\b[^.?!\n]{0,15}\bsubmitted\b/,
+  /\brefund( request)?\b[^.?!\n]{0,12}\bsubmitted\b/,
+];
+export function isRefundSubmittedStatement(text) {
+  const t = fold(text);
+  if (!/\brefunds?\b/.test(t) || NOT_SUBMITTED.test(t)) return false;
+  return SUBMITTED.some((r) => r.test(t));
+}
+
+// Pregunta cómo va el reembolso ("how long takes", "any update with this refund", "guest is waiting for refund", "any word with this update").
+const STATUS = [/\bhow long\b/, /\b(any|an) (update|updates|word|news)\b/, /\b(guest|customer|they|he|she)\b[^.?!\n]{0,25}\bwaiting\b/, /\brefund status\b|\bstatus of (the|this|our|that) refund\b/];
+/** `hasContext`: el mismo staff tiene un reembolso reciente (así "any word with this update" sin la palabra refund también cuenta). */
+export function isRefundStatusQuestion(text, hasContext = false) {
+  const t = fold(text);
+  if (!STATUS.some((r) => r.test(t))) return false;
+  return hasContext || /\brefunds?\b/.test(t);
+}
+
 const YES = /\b(yes|yeah|yep|yup|yea|sure|correct|done|did|submitted|affirmative|already|ok|okay)\b/;
 const NO = /\b(no|nope|not|never|havent|didnt|dont|wont)\b/;
 
@@ -36,6 +58,8 @@ export function readYesNo(text) {
 export const REFUND_TEXTS = {
   ask: (name) => (name ? `${name}, did you submit the refund request, correct?` : "Did you submitted the refund request, correct?"),
   yes: "Thank you so much! We will review it.",
+  stated: (name) => (name ? `${name}, thank you so much! We will review your case` : "Thank you so much! We will review your case"),
+  status: "To be transparent, we handle a high volume of refund requests, so there is a slight queue at the moment. However, we’re working as quickly as possible to process yours! Feel free to let our guest know that they’ll receive an email notification as soon as it’s completed",
   no: "Understood, feel free to do so!! Thank you.",
 };
 
@@ -59,6 +83,8 @@ export function refundAnalysis({ stage, author = "", greetingName = "" }) {
   const b = { ...base(author), refundStage: stage };
   if (stage === "asked") return { ...b, understood: "Pide un reembolso: se le pregunta si ya envió la solicitud (R2: nunca se ejecuta desde aquí).", reply: REFUND_TEXTS.ask(greetingName), replyKind: "question" };
   if (stage === "submitted") return { ...b, understood: "Dice que ya envió la solicitud de reembolso: se le agradece y queda para que Juan la revise.", reply: REFUND_TEXTS.yes, replyKind: "answer" };
+  if (stage === "stated") return { ...b, understood: "Avisa que ya envió la solicitud de reembolso: se le agradece y queda para que Juan la revise.", reply: REFUND_TEXTS.stated(greetingName), replyKind: "answer" };
+  if (stage === "status") return { ...b, understood: "Pregunta cómo va su reembolso: se le explica la cola y que el huésped recibirá un correo (no se promete fecha).", reply: REFUND_TEXTS.status, replyKind: "answer" };
   if (stage === "declined") return { ...b, understood: "Dice que todavía no envió la solicitud de reembolso: se le indica que puede hacerlo.", reply: REFUND_TEXTS.no, replyKind: "answer" };
   return { ...b, understood: "Respondió algo que no es un sí ni un no claro sobre la solicitud de reembolso: lo revisa Juan.", reply: null, replyKind: null, warnings: ["Respuesta poco clara: léela y contesta tú."] };
 }
