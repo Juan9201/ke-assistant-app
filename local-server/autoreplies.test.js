@@ -19,10 +19,11 @@ test("sí / no / ambiguo / otro tema", () => {
 
 test("textos literales, en una sola línea, y la pregunta lleva el nombre", () => {
   assert.equal(refundAnalysis({ stage: "asked", author: "AM Rashel Carswell", greetingName: "Rashel" }).reply, "Rashel, did you submit the refund request, correct?");
-  assert.equal(refundAnalysis({ stage: "submitted" }).reply, "Thank you so much! We will review it.");
-  assert.equal(refundAnalysis({ stage: "declined" }).reply, "Understood, feel free to do so!! Thank you.");
+  assert.equal(refundAnalysis({ stage: "submitted", greetingName: "Rashel" }).reply, "Rashel, thank you so much! We will review it.");
+  assert.equal(refundAnalysis({ stage: "declined", greetingName: "Rashel" }).reply, "Rashel, understood, feel free to do so!! Thank you.");
   assert.equal(refundAnalysis({ stage: "unclear" }).reply, null);
-  for (const r of Object.values(REFUND_TEXTS)) assert.ok(!String(typeof r === "function" ? r("X") : r).includes("\n"));
+  for (const r of Object.values(REFUND_TEXTS)) assert.ok(!r("X").includes(String.fromCharCode(10)));
+  for (const stage of ["asked", "submitted", "stated", "status", "declined"]) assert.ok(refundAnalysis({ stage, greetingName: "Rashel" }).reply.startsWith("Rashel, "), `${stage} lleva el nombre`);
 });
 
 test("avisos de que ya se envió la solicitud (spec 008, regla 4)", async () => {
@@ -40,6 +41,6 @@ test("preguntas por el estado del reembolso (regla 5); sin la palabra refund sol
 
 test("textos literales de las reglas 4 y 5", () => {
   assert.equal(refundAnalysis({ stage: "stated", greetingName: "Rashel" }).reply, "Rashel, thank you so much! We will review your case");
-  assert.ok(refundAnalysis({ stage: "status" }).reply.startsWith("To be transparent, we handle a high volume of refund requests"));
+  assert.ok(refundAnalysis({ stage: "status", greetingName: "Rashel" }).reply.startsWith("Rashel, to be transparent, we handle a high volume of refund requests"));
   assert.ok(refundAnalysis({ stage: "status" }).reply.endsWith("as soon as it’s completed"));
 });

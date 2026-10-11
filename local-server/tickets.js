@@ -29,7 +29,7 @@ const isHttp = (u) => typeof u === "string" && /^https?:\/\//i.test(u) && u.leng
 /** Estado derivado del análisis (los estados manuales no se tocan). */
 export function statusFromAnalysis(a) {
   if (!a) return "new";
-  if (a.protocol === "refund") return { asked: "waiting_staff", declined: "resolved" }[a.refundStage] || "escalated"; // spec 008 R-04
+  if (a.protocol === "refund") return { asked: "waiting_staff", declined: "resolved", stated: "resolved" }[a.refundStage] || "escalated"; // spec 008 R-04
   if (a.protocol === "out_of_scope" || a.verdict === "escalate") return "escalated";
   if (a.verdict === "B") return "needs_rectification";
   if (a.reply && a.replyKind === "question") return "waiting_staff";

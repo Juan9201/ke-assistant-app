@@ -55,12 +55,15 @@ export function readYesNo(text) {
   return "unclear";
 }
 
+// Toda respuesta se dirige por su nombre a quien preguntó (regla de Juan, 2026-10-10): "Rashel, thank you so much! ..."
+const named = (name, text) => (name ? `${name}, ${text[0].toLowerCase()}${text.slice(1)}` : text);
+
 export const REFUND_TEXTS = {
-  ask: (name) => (name ? `${name}, did you submit the refund request, correct?` : "Did you submitted the refund request, correct?"),
-  yes: "Thank you so much! We will review it.",
-  stated: (name) => (name ? `${name}, thank you so much! We will review your case` : "Thank you so much! We will review your case"),
-  status: "To be transparent, we handle a high volume of refund requests, so there is a slight queue at the moment. However, we’re working as quickly as possible to process yours! Feel free to let our guest know that they’ll receive an email notification as soon as it’s completed",
-  no: "Understood, feel free to do so!! Thank you.",
+  ask: (name) => named(name, "Did you submit the refund request, correct?"),
+  yes: (name) => named(name, "Thank you so much! We will review it."),
+  stated: (name) => named(name, "Thank you so much! We will review your case"),
+  status: (name) => named(name, "To be transparent, we handle a high volume of refund requests, so there is a slight queue at the moment. However, we’re working as quickly as possible to process yours! Feel free to let our guest know that they’ll receive an email notification as soon as it’s completed"),
+  no: (name) => named(name, "Understood, feel free to do so!! Thank you."),
 };
 
 const base = (requester) => ({
@@ -82,9 +85,9 @@ const base = (requester) => ({
 export function refundAnalysis({ stage, author = "", greetingName = "" }) {
   const b = { ...base(author), refundStage: stage };
   if (stage === "asked") return { ...b, understood: "Pide un reembolso: se le pregunta si ya envió la solicitud (R2: nunca se ejecuta desde aquí).", reply: REFUND_TEXTS.ask(greetingName), replyKind: "question" };
-  if (stage === "submitted") return { ...b, understood: "Dice que ya envió la solicitud de reembolso: se le agradece y queda para que Juan la revise.", reply: REFUND_TEXTS.yes, replyKind: "answer" };
-  if (stage === "stated") return { ...b, understood: "Avisa que ya envió la solicitud de reembolso: se le agradece y queda para que Juan la revise.", reply: REFUND_TEXTS.stated(greetingName), replyKind: "answer" };
-  if (stage === "status") return { ...b, understood: "Pregunta cómo va su reembolso: se le explica la cola y que el huésped recibirá un correo (no se promete fecha).", reply: REFUND_TEXTS.status, replyKind: "answer" };
-  if (stage === "declined") return { ...b, understood: "Dice que todavía no envió la solicitud de reembolso: se le indica que puede hacerlo.", reply: REFUND_TEXTS.no, replyKind: "answer" };
+  if (stage === "submitted") return { ...b, understood: "Dice que ya envió la solicitud de reembolso: se le agradece y queda para que Juan la revise.", reply: REFUND_TEXTS.yes(greetingName), replyKind: "answer" };
+  if (stage === "stated") return { ...b, understood: "Avisa que ya envió la solicitud de reembolso: se le agradece y el ticket se cierra.", reply: REFUND_TEXTS.stated(greetingName), replyKind: "answer" };
+  if (stage === "status") return { ...b, understood: "Pregunta cómo va su reembolso: se le explica la cola y que el huésped recibirá un correo (no se promete fecha).", reply: REFUND_TEXTS.status(greetingName), replyKind: "answer" };
+  if (stage === "declined") return { ...b, understood: "Dice que todavía no envió la solicitud de reembolso: se le indica que puede hacerlo.", reply: REFUND_TEXTS.no(greetingName), replyKind: "answer" };
   return { ...b, understood: "Respondió algo que no es un sí ni un no claro sobre la solicitud de reembolso: lo revisa Juan.", reply: null, replyKind: null, warnings: ["Respuesta poco clara: léela y contesta tú."] };
 }

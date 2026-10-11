@@ -245,7 +245,7 @@ test("'Yes did' → agradece y escala a Juan; el mismo mensaje re-leído no retr
   const { ops } = setup();
   ops.analyzeMessage(refundMsg());
   const r = ops.analyzeMessage(msg({ caseId: "r2", messageKey: "kr2", messageId: "mr2", text: "Yes did" }));
-  assert.equal(r.analysis.reply, "Thank you so much! We will review it.");
+  assert.equal(r.analysis.reply, "Rashel, thank you so much! We will review it.");
   assert.equal(r.ticket.status, "escalated");
   assert.equal(r.ticket.messages.length, 2);
   const again = ops.analyzeMessage(refundMsg({ caseId: "r2", messageKey: "kr2", text: "Yes did" }));
@@ -256,7 +256,7 @@ test("'No' → se le dice que puede hacerlo y el ticket queda resuelto; algo poc
   const a = setup();
   a.ops.analyzeMessage(refundMsg());
   const no = a.ops.analyzeMessage(msg({ caseId: "r2", messageKey: "kr2", text: "No" }));
-  assert.equal(no.analysis.reply, "Understood, feel free to do so!! Thank you.");
+  assert.equal(no.analysis.reply, "Rashel, understood, feel free to do so!! Thank you.");
   assert.equal(no.ticket.status, "resolved");
   const b = setup();
   b.ops.analyzeMessage(refundMsg());
@@ -289,7 +289,7 @@ test("avisa que ya envió la solicitud: agradece con el nombre y escala, aunque 
   const r = ops.analyzeMessage(msg({ caseId: "s1", messageKey: "ks1", text: "We just submitted a refund request" }));
   assert.equal(r.analysis.protocol, "refund");
   assert.equal(r.analysis.reply, "Rashel, thank you so much! We will review your case");
-  assert.equal(r.ticket.status, "escalated");
+  assert.equal(r.ticket.status, "resolved", "el aviso de envío cierra el ticket");
 });
 
 test("pregunta por el estado: explica la cola; 'any word with this update' vale si hubo un reembolso reciente", () => {
@@ -299,7 +299,7 @@ test("pregunta por el estado: explica la cola; 'any word with this update' vale 
   ops.analyzeMessage(refundMsg());
   ops.analyzeMessage(msg({ caseId: "r2", messageKey: "kr2", text: "Yes did" })); // el ticket pasa a escalado
   const q = ops.analyzeMessage(msg({ caseId: "u1", messageKey: "ku1", text: "any word with this update" }));
-  assert.ok(q.analysis.reply.startsWith("To be transparent"));
+  assert.ok(q.analysis.reply.startsWith("Rashel, to be transparent"));
   assert.equal(tickets.list().filter((t) => t.protocol === "refund").length, 1, "se suma al mismo ticket de reembolso");
 });
 
