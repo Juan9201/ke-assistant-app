@@ -193,13 +193,13 @@ async function loadKnowledgeBase(env, cfg) {
  * conocidos en mayúsculas. Si Juan no ha llenado esa tabla, devuelve un set
  * vacío y `extractGreetingName` simplemente no recorta nada.
  */
-function parseRolePrefixes(glossaryMarkdown) {
+export function parseRolePrefixes(glossaryMarkdown) {
   const fold = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
   const section = glossaryMarkdown.split(/^##\s+/m).find((s) => fold(s).startsWith("rango"));
   const prefixes = new Set();
   if (!section) return prefixes;
   for (const line of section.split("\n")) {
-    const m = line.match(/^\|\s*([A-Za-z]{1,6})\s*\|/);
+    const m = line.match(/^\|\s*([A-Za-z]{1,6}|\*)\s*\|/); // letras, o el prefijo literal "*"
     if (!m) continue;
     const token = m[1].toUpperCase();
     if (token === "PREFIJO" || /^-+$/.test(token)) continue; // encabezado / separador de tabla
@@ -216,12 +216,12 @@ function parseRolePrefixes(glossaryMarkdown) {
  * reales. Si la primera palabra no está en la lista de rangos, no se toca
  * nada — así nunca se corrompe un nombre por error.
  */
-function extractGreetingName(author, rolePrefixes) {
+export function extractGreetingName(author, rolePrefixes) {
   const words = String(author || "").trim().split(/\s+/).filter(Boolean);
   if (words.length === 0) return "";
-  const firstToken = words[0].replace(/[^A-Za-z]/g, "").toUpperCase();
-  const idx = rolePrefixes.has(firstToken) && words.length > 1 ? 1 : 0;
-  return words[idx];
+  const firstToken = words[0] === "*" ? "*" : words[0].replace(/[^A-Za-z]/g, "").toUpperCase();
+  const idx = (firstToken === "*" || rolePrefixes.has(firstToken)) && words.length > 1 ? 1 : 0; // "*" es siempre prefijo (spec 007)
+  return words[idx] === "*" ? "" : words[idx];
 }
 
 /** Extrae el nivel de autonomía de un módulo. Ante cualquier duda → escalar. */

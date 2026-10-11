@@ -11,3 +11,13 @@ local-server/data/
 # kb/ tiene su propio repo (KE-AI-Rules) y se lee en vivo desde ahí en cada
 # interpretación — no se duplica aquí para que no haya dos fuentes de verdad.
 /kb/
+
+# Fotos de entrenamiento de la visión: muestran nombres de huéspedes y datos de pago. NUNCA a GitHub.
+IMG Training/
+
+# Exportaciones sueltas de Tampermonkey (pueden traer el secreto)
+KE Assistant*.txt
+
+# Prototipo site-mapper: su perfil de Chrome guarda cookies y sesión. NUNCA a GitHub.
+tools/site-mapper/.profile/
+tools/site-mapper/node_modules/

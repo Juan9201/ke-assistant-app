@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KE Assistant — Logs</title>
+<style>
+  :root {
+    --bg: #f6f8fa; --panel: #ffffff; --text: #1f2328; --muted: #656d76; --line: #d0d7de;
+    --accent: #1f6feb; --ok: #1a7f37; --warn: #9a6700; --bad: #cf222e; --think: #8250df;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0d1117; --panel: #161b22; --text: #e6edf3; --muted: #8b949e; --line: #30363d;
+      --accent: #58a6ff; --ok: #3fb950; --warn: #d29922; --bad: #f85149; --think: #bc8cff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  header { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { font-size: 16px; margin: 0 8px 0 0; }
+  input, select, button { font: inherit; color: inherit; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; }
+  button { cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  main { display: grid; grid-template-columns: minmax(260px, 340px) 1fr; height: calc(100vh - 53px); }
+  @media (max-width: 760px) { main { grid-template-columns: 1fr; height: auto; } }
+  #list { overflow-y: auto; border-right: 1px solid var(--line); }
+  #detail { overflow-y: auto; padding: 16px; }
+  .case { padding: 10px 14px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .case:hover, .case.sel { background: var(--panel); }
+  .case .top { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--muted); }
+  .case .msg { margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .badge { font-size: 11px; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--line); white-space: nowrap; }
+  .o-answered, .o-prepared_for_human, .o-executed { color: var(--ok); border-color: var(--ok); }
+  .o-asked_missing_data { color: var(--warn); border-color: var(--warn); }
+  .o-escalated, .o-error, .o-denied { color: var(--bad); border-color: var(--bad); }
+  .empty { color: var(--muted); text-align: center; padding: 40px 16px; }
+  .ev { background: var(--panel); border: 1px solid var(--line); border-left-width: 4px; border-radius: 8px; padding: 10px 12px; margin: 0 0 10px; }
+  .ev .h { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+  .ev .t { font-weight: 600; }
+  .ev .k { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .ev .d { margin-top: 4px; white-space: pre-wrap; }
+  .ev .ts { font-size: 11px; color: var(--muted); }
+  .ev pre { margin: 6px 0 0; padding: 8px; background: var(--bg); border-radius: 6px; overflow-x: auto; font-size: 12px; }
+  .k-thought { border-left-color: var(--think); } .k-thought .d { font-style: italic; }
+  .k-input { border-left-color: var(--accent); } .k-reply { border-left-color: var(--ok); }
+  .k-escalation, .k-error { border-left-color: var(--bad); } .k-check, .k-decision { border-left-color: var(--warn); }
+  .k-action, .k-evidence, .k-match, .k-extract { border-left-color: var(--muted); }
+  .k-vision { border-left-color: var(--think); } .k-approval { border-left-color: var(--ok); }
+  .k-end { border-left-color: var(--text); }
+  h2 { margin: 0 0 4px; font-size: 16px; } .sub { color: var(--muted); margin-bottom: 14px; }
+  .prog { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin: 0 0 14px; position: sticky; top: 0; z-index: 2; }
+  .prog .row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .prog .now { font-weight: 600; }
+  .prog .sw { font: 600 22px/1 ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; }
+  .bar { height: 10px; border-radius: 6px; background: var(--bg); border: 1px solid var(--line); margin: 8px 0; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--accent); transition: width .3s; }
+  .bar.fail > i { background: var(--bad); } .bar.done > i { background: var(--ok); }
+  .steps { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 6px; }
+  .steps td { padding: 3px 6px; border-top: 1px solid var(--line); } .steps td:last-child { text-align: right; font-family: ui-monospace, Consolas, monospace; }
+  .st-done { color: var(--ok); } .st-fail { color: var(--bad); } .st-start { color: var(--accent); } .st-wait { color: var(--muted); }
+  #drop { border: 2px dashed var(--line); border-radius: 10px; margin: 16px; padding: 28px; text-align: center; color: var(--muted); }
+  #drop.over { border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>KE Assistant — Logs</h1>
+  <button class="primary" id="open">Abrir archivo(s) .jsonl</button>
+  <input type="file" id="file" accept=".jsonl,.json,.txt" multiple hidden>
+  <select id="fOutcome" aria-label="Filtrar por resultado">
+    <option value="">Todos los resultados</option>
+    <option value="answered">Respondido</option>
+    <option value="asked_missing_data">Pidió datos</option>
+    <option value="prepared_for_human">Preparado para humano</option>
+    <option value="executed">Ejecutado</option>
+    <option value="denied">Negado</option>
+    <option value="escalated">Escalado</option>
+    <option value="error">Error</option>
+  </select>
+  <input id="q" type="search" placeholder="Buscar texto…" aria-label="Buscar texto">
+  <button id="export" disabled>Exportar caso</button>
+  <span class="ts" id="count" style="color:var(--muted)"></span>
+  <span class="ts" id="status"></span>
+</header>
+<main>
+  <section id="list"><div id="drop">Arrastra aquí los archivos de <code>local-server/data/logs/</code> o usa “Abrir archivo(s)”.<br>Todo se lee en tu navegador; nada se envía a ningún servidor.</div></section>
+  <section id="detail"><div class="empty">Elige un caso de la lista para ver qué pasó y qué se pensó.</div></section>
+</main>
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  let cases = new Map(); // caseId -> { id, events: [], end }
+  let selected = null;
+
+  function parse(text) {
+    for (const raw of text.split("\n")) {
+      const line = raw.trim();
+      if (!line) continue;
+      let rec;
+      try { rec = JSON.parse(line); } catch { continue; }
+      if (!rec.caseId) continue;
+      if (!cases.has(rec.caseId)) cases.set(rec.caseId, { id: rec.caseId, events: [], end: null });
+      const c = cases.get(rec.caseId);
+      c.events.push(rec);
+      if (rec.kind === "end") c.end = rec;
+    }
+    for (const c of cases.values()) c.events.sort((a, b) => (a.seq - b.seq) || a.ts.localeCompare(b.ts));
+  }
+
+  async function load(files) {
+    for (const f of files) parse(await f.text());
+    renderList();
+  }
+
+  const firstInput = (c) => c.events.find((e) => e.kind === "input");
+  const startTs = (c) => (c.events[0] ? c.events[0].ts : "");
+  // Un caso abierto aún no tiene meta de cierre: el autor se toma del mensaje recibido.
+  const metaOf = (c) => (c.end && c.end.meta) || { author: ((c.events.find((e) => e.kind === "input") || {}).data || {}).author || "" };
+  const outcomeOf = (c) => (c.end ? c.end.outcome : "");
+  const label = { answered: "Respondido", asked_missing_data: "Pidió datos", prepared_for_human: "Preparado", executed: "Ejecutado", denied: "Negado", escalated: "Escalado", error: "Error", "": "Abierto" };
+
+  function matches(c) {
+    const fo = $("fOutcome").value, q = $("q").value.trim().toLowerCase();
+    if (fo && outcomeOf(c) !== fo) return false;
+    if (q && !JSON.stringify(c.events).toLowerCase().includes(q)) return false;
+    return true;
+  }
+
+  function renderList() {
+    const list = $("list");
+    list.textContent = "";
+    const items = [...cases.values()].filter(matches).sort((a, b) => startTs(b).localeCompare(startTs(a)));
+    $("count").textContent = cases.size ? `${items.length} de ${cases.size} casos` : "";
+    if (!items.length) {
+      const d = document.createElement("div");
+      d.className = "empty";
+      d.textContent = cases.size ? "Ningún caso coincide con el filtro." : "Aún no hay logs cargados.";
+      list.append(d);
+      return;
+    }
+    for (const c of items) {
+      const el = document.createElement("div");
+      el.className = "case" + (selected === c.id ? " sel" : "");
+      const top = document.createElement("div");
+      top.className = "top";
+      const who = document.createElement("span");
+      const meta = metaOf(c);
+      who.textContent = `${meta.author || "—"} · ${new Date(startTs(c)).toLocaleString()}`;
+      const b = document.createElement("span");
+      b.className = "badge o-" + outcomeOf(c);
+      b.textContent = label[outcomeOf(c)] || outcomeOf(c);
+      top.append(who, b);
+      const msg = document.createElement("div");
+      msg.className = "msg";
+      const inp = firstInput(c);
+      msg.textContent = inp ? (inp.detail || inp.title) : c.id;
+      el.append(top, msg);
+      el.addEventListener("click", () => { selected = c.id; lastCount = c.events.length; renderList(); renderDetail(c); });
+      list.append(el);
+    }
+  }
+
+  const fmt = (ms) => {
+    ms = Math.max(0, ms);
+    const m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000), d = Math.floor((ms % 1000) / 100);
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}.${d}`;
+  };
+
+  // Progreso: "paso i de N", barra, cronómetro del caso y tiempo de cada paso.
+  function buildProgress(c) {
+    const byIndex = new Map();
+    let total = 0;
+    for (const e of c.events) {
+      if (e.kind !== "step" || !e.data) continue;
+      const d = e.data;
+      total = Math.max(total, d.total);
+      const s = byIndex.get(d.index) || { index: d.index };
+      s.label = e.title;
+      if (d.state === "start") { s.start = s.start || e.ts; s.state = s.state || "start"; }
+      else { s.end = e.ts; s.start = s.start || e.ts; s.state = d.state; s.detail = e.detail; }
+      byIndex.set(d.index, s);
+    }
+    if (!total) return null;
+    const steps = [...byIndex.values()].sort((a, b) => a.index - b.index);
+    const done = steps.filter((s) => s.state === "done").length;
+    const failed = steps.find((s) => s.state === "fail");
+    const current = failed || steps.find((s) => s.state === "start") || null;
+    const closed = !!c.end;
+    const t0 = c.events[0].ts;
+    const t1 = closed ? c.end.ts : "";
+
+    const box = document.createElement("div");
+    box.className = "prog";
+    const row = document.createElement("div");
+    row.className = "row";
+    const now = document.createElement("span");
+    now.className = "now";
+    now.textContent = failed ? `Falló el paso ${failed.index} de ${total}: ${failed.label}`
+      : closed && done === total ? `Completado: ${total} de ${total} pasos`
+      : current ? `Paso ${current.index} de ${total}: ${current.label}`
+      : `${done} de ${total} pasos`;
+    const sw = document.createElement("span");
+    sw.className = "sw";
+    sw.dataset.start = t0;
+    if (t1) sw.dataset.end = t1;
+    sw.textContent = fmt((t1 ? Date.parse(t1) : Date.now()) - Date.parse(t0));
+    row.append(now, sw);
+
+    const bar = document.createElement("div");
+    bar.className = "bar" + (failed ? " fail" : closed && done === total ? " done" : "");
+    const fill = document.createElement("i");
+    fill.style.width = `${Math.round((done / total) * 100)}%`;
+    bar.append(fill);
+
+    const table = document.createElement("table");
+    table.className = "steps";
+    for (let i = 1; i <= total; i++) {
+      const s = byIndex.get(i);
+      const tr = document.createElement("tr");
+      const a = document.createElement("td"), b = document.createElement("td"), t = document.createElement("td");
+      a.textContent = `${i}. ${s ? s.label : "(pendiente)"}`;
+      b.textContent = !s ? "pendiente" : s.state === "done" ? "listo" : s.state === "fail" ? "falló" : "en curso";
+      b.className = !s ? "st-wait" : `st-${s.state}`;
+      if (s && s.start) {
+        t.className = "sw-step";
+        t.dataset.start = s.start;
+        if (s.end) t.dataset.end = s.end;
+        t.textContent = fmt((s.end ? Date.parse(s.end) : Date.now()) - Date.parse(s.start));
+      }
+      tr.append(a, b, t);
+      table.append(tr);
+    }
+    box.append(row, bar, table);
+    return box;
+  }
+
+  // El cronómetro avanza solo cada 250 ms sin volver a pedir datos.
+  setInterval(() => {
+    document.querySelectorAll(".sw[data-start], .sw-step[data-start]").forEach((el) => {
+      if (el.dataset.end) return;
+      el.textContent = fmt(Date.now() - Date.parse(el.dataset.start));
+    });
+  }, 250);
+
+  function renderDetail(c) {
+    const box = $("detail");
+    box.textContent = "";
+    $("export").disabled = false;
+    const meta = metaOf(c);
+    const h = document.createElement("h2");
+    h.textContent = `Caso ${c.id}`;
+    const sub = document.createElement("div");
+    sub.className = "sub";
+    sub.textContent = [meta.author, c.end ? `Resultado: ${label[c.end.outcome]}` : "Caso abierto", c.end && c.end.detail].filter(Boolean).join(" · ");
+    box.append(h, sub);
+    const prog = buildProgress(c);
+    if (prog) box.append(prog);
+    for (const e of c.events) {
+      const ev = document.createElement("div");
+      ev.className = `ev k-${e.kind}`;
+      const head = document.createElement("div");
+      head.className = "h";
+      const t = document.createElement("span");
+      t.className = "t";
+      t.textContent = e.title || e.kind;
+      const right = document.createElement("span");
+      right.className = "k";
+      right.textContent = `${e.kind} · ${new Date(e.ts).toLocaleTimeString()}`;
+      head.append(t, right);
+      ev.append(head);
+      if (e.detail) { const d = document.createElement("div"); d.className = "d"; d.textContent = e.detail; ev.append(d); }
+      if (e.data !== undefined) { const p = document.createElement("pre"); p.textContent = JSON.stringify(e.data, null, 2); ev.append(p); }
+      box.append(ev);
+    }
+  }
+
+  // Modo en vivo: si el visor lo sirve el servidor local (http), se piden los logs
+  // al propio servidor cada 2 s; no hay que cargar ningún archivo.
+  const live = location.protocol === "http:" || location.protocol === "https:";
+  let lastCount = -1;
+  function ingest(data) {
+    const scroll = $("list").scrollTop;
+    cases = new Map(data.cases.map((c) => [c.id, { id: c.id, events: c.events, end: c.events.find((e) => e.kind === "end") || null }]));
+    if (!selected && data.cases.length) selected = data.cases[0].id;
+    renderList();
+    $("list").scrollTop = scroll;
+    const c = cases.get(selected);
+    if (c && c.events.length !== lastCount) { lastCount = c.events.length; renderDetail(c); }
+  }
+  async function poll() {
+    try {
+      const res = await fetch("/api/logs", { cache: "no-store" });
+      if (!res.ok) throw new Error(res.status);
+      ingest(await res.json());
+      $("status").textContent = "● en vivo";
+      $("status").style.color = "var(--ok)";
+    } catch {
+      $("status").textContent = "● sin conexión con el servidor";
+      $("status").style.color = "var(--bad)";
+    }
+  }
+  if (live) {
+    $("open").hidden = true;
+    const d = $("drop"); if (d) d.remove();
+    poll();
+    setInterval(poll, 2000);
+  }
+
+  $("open").addEventListener("click", () => $("file").click());
+  $("file").addEventListener("change", (e) => load([...e.target.files]));
+  $("fOutcome").addEventListener("change", renderList);
+  $("q").addEventListener("input", renderList);
+  $("export").addEventListener("click", () => {
+    const c = cases.get(selected);
+    if (!c) return;
+    const blob = new Blob([c.events.map((e) => JSON.stringify(e)).join("\n") + "\n"], { type: "application/x-ndjson" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `caso-${c.id}.jsonl`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+  document.addEventListener("dragover", (e) => { e.preventDefault(); const d = $("drop"); if (d) d.classList.add("over"); });
+  document.addEventListener("dragleave", () => { const d = $("drop"); if (d) d.classList.remove("over"); });
+  document.addEventListener("drop", (e) => { e.preventDefault(); load([...e.dataTransfer.files]); });
+})();
+</script>
+</body>
+</html>
