@@ -74,3 +74,23 @@ test("el almacén no crece sin límite", () => {
   for (let i = 0; i < 20; i++) s.create(gravity({ params: { receiptNumber: String(19400000 + i) } }));
   assert.ok(s.size() <= 5);
 });
+
+test("el lector deja un latido: se sabe hace cuánto preguntó por última vez", () => {
+  let t = 1000;
+  const s = createLookupStore({ now: () => t });
+  assert.equal(s.readerAgoMs("gravity"), null);
+  s.next("gravity");
+  t += 45_000;
+  assert.equal(s.readerAgoMs("gravity"), 45_000);
+  assert.equal(s.readerAgoMs("amusement"), null);
+});
+
+test("una consulta sin atender caduca a los 120 s, no antes", () => {
+  let t = 0;
+  const s = createLookupStore({ now: () => t });
+  const c = s.create({ system: "gravity", kind: "transaction", params: { receiptNumber: "19486206" }, caseId: "c" });
+  t += 100_000;
+  assert.equal(s.get(c.job.id).status, "pending");
+  t += 21_000;
+  assert.equal(s.get(c.job.id).status, "expired");
+});

@@ -336,7 +336,7 @@ const server = http.createServer(async (req, res) => {
           console.error("No se pudo escribir el log de la consulta caducada:", err.message);
         }
       }
-      sendJson(res, 200, headers, { id: job.id, status: job.status, error: job.error });
+      sendJson(res, 200, headers, { id: job.id, status: job.status, error: job.error, readerAgoMs: lookups.readerAgoMs(job.system) });
       return;
     }
 

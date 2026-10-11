@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         KE Assistant — Connecteam listener v2
 // @namespace    https://github.com/Juan9201/ke-assistant
-// @version      2.7.1
+// @version      2.8.0
 // @description  Detecta mensajes nuevos en Gravity Support y sugiere una respuesta. Solo envía si tú haces clic en "Enviar".
 // @match        https://app.connecteam.com/*
 // @grant        GM_xmlhttpRequest
@@ -103,7 +103,7 @@
 
   // Versión del "contrato" con el servidor local (forma de la respuesta de analyze_flames).
   // Si no coincide con la del servidor, el panel avisa en vez de fallar con un error críptico.
-  const SCRIPT_VERSION = "2.7.1";
+  const SCRIPT_VERSION = "2.8.0";
   const EXPECTED_CONTRACT = 2;
 
   const QUIET_MS = 2500; // tiempo sin cambios para considerar que el historial terminó de cargar
@@ -426,13 +426,11 @@
           await ensureParks();
           const flameCard = addFlameCard(data, analysis);
           if (!data.forceNew) openCards.set(foldName(data.author || ""), { card: flameCard, ts: Date.now() });
-          if (data.images?.length) flameCard.addImages(data.images);
-          if (CONFIG.AUTO_INSERT_WHEN_EMPTY && analysis.reply) {
-            const composer = findComposer();
-            if (composer && composerIsEmpty(composer)) {
-              insertReplyToOriginal(data, analysis.reply, (ok) => ok && flameCard.markQuestionInserted());
-            }
+          if (data.images?.length) {
+            flameCard.hold(120000); // la pregunta espera a que se lea la foto (spec 014)
+            flameCard.addImages(data.images);
           }
+          flameCard.autoSync();
           continue;
         }
         const result = await interpret(data);
@@ -1256,6 +1254,51 @@
       evidenceEl.append(el("div", { className: "sec", textContent: "Evidencia leída en Gravity" }), list, banner);
     }
 
+    /* ---- Sugerencia automática en el cuadro de Connecteam (spec 014) ----
+       Se inserta cuando el cuadro está vacío y se ACTUALIZA mientras siga siendo exactamente esa sugerencia
+       (p. ej. al terminar de leer la foto); si una persona escribió algo, no se toca. */
+    let lastAuto = null; // contenido del cuadro justo después de insertar la sugerencia; null = aún no se insertó
+    let lastAutoReply = "";
+    let held = false;
+    let heldTimer = null;
+    function hold(ms) {
+      held = true;
+      status.textContent = "Leyendo la foto antes de proponer la pregunta…";
+      clearTimeout(heldTimer);
+      heldTimer = setTimeout(release, ms);
+    }
+    function release() {
+      if (!held) return;
+      held = false;
+      clearTimeout(heldTimer);
+      if (/^Leyendo la foto antes/.test(status.textContent)) status.textContent = "";
+      autoSync();
+    }
+    function autoSync() {
+      if (!CONFIG.AUTO_INSERT_WHEN_EMPTY || held) return;
+      const composer = findComposer();
+      if (!composer) return;
+      const reply = analysis.reply || "";
+      const cur = norm(composer.isContentEditable ? composer.innerText : composer.value);
+      if (lastAuto === null) {
+        if (reply && composerIsEmpty(composer)) {
+          lastAutoReply = reply;
+          insertReplyToOriginal(data, reply, (ok) => {
+            if (!ok) return;
+            lastAuto = pendingAiText;
+            card.markQuestionInserted();
+          });
+        }
+        return;
+      }
+      if (cur === lastAuto && reply !== lastAutoReply) {
+        clearComposer(composer);
+        lastAutoReply = reply;
+        if (reply) insertReplyToOriginal(data, reply, (ok) => ok && (lastAuto = pendingAiText));
+        else lastAuto = "";
+      }
+    }
+
     async function askGravity(receiptNumber) {
       askedReceipts.add(receiptNumber);
       gravNote.textContent = "Pidiendo la lectura del recibo a Gravity…";
@@ -1268,13 +1311,13 @@
           const s = await callBackend({ action: "lookup_status", id });
           if (s.status === "done") break;
           if (s.status === "error") throw new Error(s.error || "El lector de Gravity falló");
-          if (s.status === "expired" || Date.now() - t0 > 90000) {
+          if (s.status === "expired" || Date.now() - t0 > 150000) {
             askedReceipts.delete(receiptNumber);
             gravNote.textContent = "No pude leer Gravity: abre una pestaña de Gravity con tu sesión iniciada y pulsa Actualizar.";
             gravRetry.style.display = "";
             return;
           }
-          gravNote.textContent = s.status === "taken" ? "Leyendo el recibo en Gravity…" : "Esperando al lector de Gravity (¿hay una pestaña de Gravity abierta con sesión?)…";
+          gravNote.textContent = s.status === "taken" ? "Leyendo el recibo en Gravity…" : s.readerAgoMs == null || s.readerAgoMs > 15000 ? "El lector de Gravity no responde" + (s.readerAgoMs == null ? "" : ` desde hace ${Math.round(s.readerAgoMs / 1000)} s`) + ": abre o activa la pestaña de Gravity (con sesión iniciada)…" : "Esperando al lector de Gravity…";
           await new Promise((r) => setTimeout(r, 1500));
         }
         gravNote.textContent = "";
@@ -1307,6 +1350,7 @@
         if (mine !== seq) return; // llegó una respuesta más nueva
         analysis = a;
         render();
+        autoSync();
         maybeAskGravity(a);
       } catch (e) {
         status.textContent = `Error al re-evaluar: ${e.message}`;
@@ -1394,11 +1438,15 @@
         const result = await callBackend({ action: "read_image", caseId: data.caseId, mime: "image/jpeg", imageBase64: up.base64 }, 90000);
         renderPhoto(box, up.canvas, result, { orig: [best.bmp.width, best.bmp.height], lowRes: up.lowRes, viaLightbox, secs: ((Date.now() - t0) / 1000).toFixed(1) });
         await reanalyze();
+        release();
       } catch (e) {
+        release();
         box.replaceChildren(el("div", { className: "blockers", textContent: /^No pude/.test(e.message) ? e.message : `No pude leer la foto: ${e.message}` }));
       }
     }
     card.addImages = (urls) => urls.forEach((u) => addPhoto(u));
+    card.hold = hold;
+    card.autoSync = autoSync;
 
     render();
     pushCard(card);

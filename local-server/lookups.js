@@ -21,8 +21,9 @@ const PARAM_RULES = {
     /^\d{10}$/.test(String(p.card)) && Number.isInteger(p.locationId) ? null : "card (10 dígitos) y locationId (entero) son obligatorios",
 };
 
-export function createLookupStore({ now = () => Date.now(), pendingTtlMs = 90_000, takenTtlMs = 60_000, dedupeMs = 120_000, max = 500 } = {}) {
+export function createLookupStore({ now = () => Date.now(), pendingTtlMs = 120_000, takenTtlMs = 60_000, dedupeMs = 120_000, max = 500 } = {}) {
   const jobs = new Map();
+  const readerSeen = {}; // sistema -> última vez que su lector preguntó por trabajo (latido)
   let seq = 0;
 
   const expire = () => {
@@ -54,6 +55,7 @@ export function createLookupStore({ now = () => Date.now(), pendingTtlMs = 90_00
     },
     /** Lo llama el lector de ese sistema: toma la consulta pendiente más antigua. */
     next(system) {
+      readerSeen[system] = now();
       expire();
       for (const j of jobs.values()) {
         if (j.system === system && j.status === "pending") {
@@ -79,6 +81,8 @@ export function createLookupStore({ now = () => Date.now(), pendingTtlMs = 90_00
       const j = jobs.get(id);
       return j ? { ...view(j), result: j.result, error: j.error || "" } : null;
     },
+    /** Milisegundos desde que el lector de ese sistema preguntó por última vez (null si nunca desde que arrancó el servidor). */
+    readerAgoMs: (system) => (readerSeen[system] ? now() - readerSeen[system] : null),
     size: () => jobs.size,
   };
 }
